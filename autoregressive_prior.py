@@ -20,14 +20,17 @@ class MaskedLinear(nn.Linear):
         return nn.functional.linear(x, self.weight*self.mask, self.bias)
 
 class CausalAssignmentNet(nn.Module):
-    def __init__(self, batch_size, n_latents, n_causal_vars, temp=1.0):
+    def __init__(self, n_latents, n_causal_vars, temp=1.0):
         super().__init__()
-        self.batch_size = batch_size
         self.params = nn.Parameter(torch.randn(n_latents, n_causal_vars))
         self.temp = temp
 
-    def forward(self):
-        return nn.functional.gumbel_softmax(self.params.expand(self.batch_size, -1, -1), 
+    def forward(self, batch_size, seq_len=None):
+        if seq_len:
+            exp_dims = [batch_size, seq_len, -1, -1]
+        else:
+            exp_dims = [batch_size, -1, -1]
+        return nn.functional.gumbel_softmax(self.params.expand(exp_dims), 
                                        tau=self.temp, hard=True)
     
     def get_softmax_dist(self):
@@ -84,7 +87,8 @@ class AutoregressivePrior(nn.Module):
 
     def compute_kl_loss(self, z_t, intrv, z_t1_mean, z_t1_logstd, z_t1_samples):
         ## Sample latent-to-causal assignments
-        causal_assignments = self.causal_assignment_net() # [batch_size, n_latents, n_causal_vars]
+        batch_size = intrv.shape[0]
+        causal_assignments = self.causal_assignment_net(batch_size) # [batch_size, n_latents, n_causal_vars]
         causal_assignments = causal_assignments.permute(0, 2, 1)
 
         ## Add extra variable to intervention one hots to capture noise
