@@ -126,6 +126,9 @@ def train_model(model_class, train_loader, val_loader,
         callback_kwargs = dict()
     callbacks = model_class.get_callbacks(exmp_inputs=next(iter(val_loader)), cluster=cluster, 
                                           **callback_kwargs)
+
+    print("here")
+    print(root_dir)
     if not debug:
         callbacks.append(
                 ModelCheckpoint(save_weights_only=True, 
@@ -222,7 +225,7 @@ if __name__ == '__main__':
     parser.add_argument('--logger_name', type=str, default='')
     parser.add_argument('--files_to_save', type=str, nargs='+', default='')
 
-    parser.add_argument('--model', type=str, default='iCITRISVAE')
+    parser.add_argument('--model', type=str, default='CITRISVAE')
     parser.add_argument('--c_hid', type=int, default=32)
     parser.add_argument('--decoder_num_blocks', type=int, default=1)
     parser.add_argument('--act_fn', type=str, default='silu')

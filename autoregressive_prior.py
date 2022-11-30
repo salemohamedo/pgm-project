@@ -106,6 +106,14 @@ class AutoregressivePrior(nn.Module):
         causal_assign_probs = self.causal_assignment_net.get_softmax_dist()
         kl = (kl * causal_assign_probs.permute(1, 0).unsqueeze(0))
         return kl.sum(dim=[1,2])
+    
+    ## TODO: Rewrite
+    def get_target_assignment(self, hard=False):
+        # Returns psi, either 'hard' (one-hot, e.g. for triplet eval) or 'soft' (probabilities, e.g. for debug)
+        if not hard:
+            return torch.softmax(self.causal_assignment_net.params, dim=-1)
+        else:
+            return F.one_hot(torch.argmax(self.causal_assignment_net.params, dim=-1), num_classes=self.target_params.shape[-1])
 
 if __name__ == '__main__':
     x = torch.rand(4)

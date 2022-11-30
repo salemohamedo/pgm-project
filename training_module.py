@@ -10,7 +10,8 @@ import os
 from collections import OrderedDict, defaultdict
 from utils import SineWarmupScheduler, CosineWarmupScheduler
 from callbacks import CorrelationMetricsLogCallback, ImageLogCallback
-from AE import Encoder, Decoder
+# from AE import Encoder, Decoder
+from CITRIS_encoder_decoder import Encoder, Decoder
 from AE_basic import Autoencoder
 from autoregressive_prior import CausalAssignmentNet, AutoregressivePrior
 from intervention_classifier import InterventionClassifier
@@ -96,9 +97,20 @@ class CITRISVAE(pl.LightningModule):
         self.save_hyperparameters()
 
         # Encoder-Decoder init
-        self.encoder = Encoder(self.hparams.num_latents)
-        self.decoder = Decoder(self.hparams.num_latents)
-
+        # self.encoder = Encoder(self.hparams.num_latents)
+        # self.decoder = Decoder(self.hparams.num_latents)
+        self.encoder = Encoder(num_latents=self.hparams.num_latents,
+                                    c_hid=self.hparams.c_hid,
+                                    c_in=self.hparams.c_in,
+                                    width=self.hparams.img_width,
+                                    act_fn=lambda: nn.ReLU(),
+                                    variational=True)
+        self.decoder = Decoder(num_latents=self.hparams.num_latents,
+                                    c_hid=self.hparams.c_hid,
+                                    c_out=self.hparams.c_in,
+                                    width=self.hparams.img_width,
+                                    num_blocks=self.hparams.decoder_num_blocks,
+                                    act_fn=lambda: nn.ReLU())
         # CausalAssignmentNet
         self.causal_assignment_net = CausalAssignmentNet(
             n_latents=self.hparams.num_latents,
@@ -171,11 +183,11 @@ class CITRISVAE(pl.LightningModule):
         z_sample, z_mean, z_logstd, x_rec = [t.unflatten(0, (imgs.shape[0], -1)) for t in [z_sample, z_mean, z_logstd, x_rec]]
 
         # Calculate KL divergence between every pair of frames
-        kld_t1_all = self.prior_t1.kl_divergence(z_t=z_mean[:,:-1].flatten(0, 1), 
-                                                     target=target.flatten(0, 1), 
+        kld_t1_all = self.prior_t1.compute_kl_loss(z_t=z_mean[:,:-1].flatten(0, 1), 
+                                                     intrv=target.flatten(0, 1), 
                                                      z_t1_mean=z_mean[:,1:].flatten(0, 1), 
                                                      z_t1_logstd=z_logstd[:,1:].flatten(0, 1), 
-                                                     z_t1_sample=z_sample[:,1:].flatten(0, 1))
+                                                     z_t1_samples=z_sample[:,1:].flatten(0, 1))
         kld_t1_all = kld_t1_all.unflatten(0, (imgs.shape[0], -1)).sum(dim=1)
 
         # Calculate reconstruction loss
@@ -188,10 +200,10 @@ class CITRISVAE(pl.LightningModule):
         loss = (kld_factor * (kld_t1_all * self.hparams.beta_t1) + rec_loss.sum(dim=1)).mean()
         loss = loss / (imgs.shape[1] - 1)
         # Add target classifier loss
-        loss_model, loss_z = self.intv_classifier(z_sample=z_sample,
-                                                  logger=self if not self.hparams.cluster_logging else None, 
-                                                  target=target,
-                                                  transition_prior=self.prior_t1)
+        loss_model, loss_z = self.intv_classifier(z_samples=z_sample,
+                                                #   logger=self if not self.hparams.cluster_logging else None, 
+                                                  intrv_targets=target)
+                                                #   transition_prior=self.prior_t1)
         loss = loss + (loss_model + loss_z) * self.hparams.beta_classifier
 
         # Logging

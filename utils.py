@@ -3,7 +3,7 @@ import torch
 from torch import nn
 import torch.optim as optim
 import matplotlib.pyplot as plt
-import sns
+import seaborn as sns
 import os
 
 
