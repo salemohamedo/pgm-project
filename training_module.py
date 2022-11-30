@@ -10,6 +10,10 @@ import os
 from collections import OrderedDict, defaultdict
 from utils import SineWarmupScheduler, CosineWarmupScheduler
 from callbacks import CorrelationMetricsLogCallback, ImageLogCallback
+from AE import Encoder, Decoder
+from AE_basic import Autoencoder
+from autoregressive_prior import CausalAssignmentNet, AutoregressivePrior
+from intervention_classifier import InterventionClassifier
 
 class CITRISVAE(pl.LightningModule):
     """ The main module implementing CITRIS-VAE """
@@ -92,12 +96,28 @@ class CITRISVAE(pl.LightningModule):
         self.save_hyperparameters()
 
         # Encoder-Decoder init
-        self.encoder = nn.Identity()
-        self.decoder = nn.Identity()
+        self.encoder = Encoder(self.hparams.num_latents)
+        self.decoder = Decoder(self.hparams.num_latents)
+
+        # CausalAssignmentNet
+        self.causal_assignment_net = CausalAssignmentNet(
+            n_latents=self.hparams.num_latents,
+            n_causal_vars=self.hparams.num_causal_vars + 1)
+
         # Transition prior
-        self.prior_t1 = nn.Identity()
+        self.prior_t1 = AutoregressivePrior(
+            causal_assignment_net=self.causal_assignment_net, 
+            n_latents=self.hparams.num_latents,
+            n_causal_vars=self.hparams.num_causal_vars + 1, 
+            n_hid_per_latent=self.hparams.c_hid)
+
         # Target classifier
-        self.intv_classifier = nn.Identity()
+        self.intv_classifier = InterventionClassifier(
+            causal_assignment_net=self.causal_assignment_net,
+            n_latents=self.hparams.num_latents,
+            n_causal_vars=self.hparams.num_causal_vars,
+            hidden_dim=self.hparams.c_hid,
+            momentum=self.hparams.classifier_momentum)
 
         # Warmup scheduler for KL (if selected)
         self.kld_scheduler = SineWarmupScheduler(kld_warmup)

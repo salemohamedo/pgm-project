@@ -29,12 +29,12 @@ def load_datasets(args):
         data_folder=args.data_dir, split='train', single_image=False, triplet=False, seq_len=args.seq_len, **dataset_args)
     val_dataset = InterventionalPongDataset(
         data_folder=args.data_dir, split='val_indep', single_image=True, triplet=False, return_latents=True, **dataset_args, **test_args(train_dataset))
-    # val_triplet_dataset = InterventionalPongDataset(
-    #     data_folder=args.data_dir, split='val', single_image=False, triplet=True, return_latents=True, **dataset_args, **test_args(train_dataset))
+    val_triplet_dataset = InterventionalPongDataset(
+        data_folder=args.data_dir, split='val', single_image=False, triplet=True, return_latents=True, **dataset_args, **test_args(train_dataset))
     test_dataset = InterventionalPongDataset(
         data_folder=args.data_dir, split='test_indep', single_image=True, triplet=False, return_latents=True, **dataset_args, **test_args(train_dataset))
-    # test_triplet_dataset = InterventionalPongDataset(
-    #     data_folder=args.data_dir, split='test', single_image=False, triplet=True, return_latents=True, **dataset_args, **test_args(train_dataset))
+    test_triplet_dataset = InterventionalPongDataset(
+        data_folder=args.data_dir, split='test', single_image=False, triplet=True, return_latents=True, **dataset_args, **test_args(train_dataset))
     if args.exclude_objects is not None and data_name == 'causal3d':
         test_dataset = {
             'orig_wo_' + '_'.join([str(o) for o in args.exclude_objects]): test_dataset
@@ -50,10 +50,10 @@ def load_datasets(args):
                                 data_folder=args.data_dir, split='test_indep', single_image=True, triplet=False, return_latents=True, exclude_objects=[i for i in range(7) if i != o], **dataset_args, **test_args(train_dataset))
     train_loader = data.DataLoader(train_dataset, batch_size=args.batch_size,
                                    shuffle=True, pin_memory=True, drop_last=True, num_workers=args.num_workers)
-    # val_triplet_loader = data.DataLoader(val_triplet_dataset, batch_size=args.batch_size,
-    #                               shuffle=False, drop_last=False, num_workers=args.num_workers)
-    # test_triplet_loader = data.DataLoader(test_triplet_dataset, batch_size=args.batch_size,
-    #                               shuffle=False, drop_last=False, num_workers=args.num_workers)
+    val_triplet_loader = data.DataLoader(val_triplet_dataset, batch_size=args.batch_size,
+                                  shuffle=False, drop_last=False, num_workers=args.num_workers)
+    test_triplet_loader = data.DataLoader(test_triplet_dataset, batch_size=args.batch_size,
+                                  shuffle=False, drop_last=False, num_workers=args.num_workers)
 
     print(f'Training dataset size: {len(train_dataset)} / {len(train_loader)}')
     # print(f'Val triplet dataset size: {len(val_triplet_dataset)} / {len(val_triplet_loader)}')
@@ -70,14 +70,14 @@ def load_datasets(args):
     datasets = {
         'train': train_dataset,
         'val': val_dataset,
-        # 'val_triplet': val_triplet_dataset,
+        'val_triplet': val_triplet_dataset,
         'test': test_dataset,
-        # 'test_triplet': test_triplet_dataset
+        'test_triplet': test_triplet_dataset
     }
     data_loaders = {
         'train': train_loader,
-        # 'val_triplet': val_triplet_loader,
-        # 'test_triplet': test_triplet_loader
+        'val_triplet': val_triplet_loader,
+        'test_triplet': test_triplet_loader
     }
     return datasets, data_loaders, data_name
 
@@ -202,7 +202,7 @@ if __name__ == '__main__':
 
     # Default arguments
     parser.add_argument('--data_dir', type=str, required=True)
-    parser.add_argument('--causal_encoder_checkpoint', type=str, required=True)
+    # parser.add_argument('--causal_encoder_checkpoint', type=str, required=True)
     parser.add_argument('--cluster', action="store_true")
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--max_epochs', type=int, default=200)

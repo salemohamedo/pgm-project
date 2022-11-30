@@ -13,7 +13,7 @@ import torch.optim as optim
 
 class Encoder(nn.Module):
     
-    def __init__(self, encoded_space_dim,fc2_input_dim):
+    def __init__(self, encoded_space_dim,fc2_input_dim=None):
         super().__init__()
         
         ### Convolutional section
@@ -44,7 +44,7 @@ class Encoder(nn.Module):
 
 class Decoder(nn.Module):
     
-    def __init__(self, encoded_space_dim,fc2_input_dim):
+    def __init__(self, encoded_space_dim,fc2_input_dim=None):
         super().__init__()
         self.decoder_lin = nn.Sequential(
             nn.Linear(encoded_space_dim, 128),
