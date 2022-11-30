@@ -11,7 +11,7 @@ import os
 from collections import OrderedDict, defaultdict
 from tqdm.auto import tqdm
 from scipy.stats import spearmanr
-from causal_encoder import CausalEncoder
+# from causal_encoder import CausalEncoder
 from utils import visualize_reconstruction, plot_target_assignment, plot_target_classification, log_matrix
 
 
