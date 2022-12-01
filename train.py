@@ -174,11 +174,12 @@ def train_model(model_class, train_loader, val_loader,
         if op_before_running is not None:
             op_before_running(model)
         trainer.fit(model, train_loader, val_loader)
-        model = model_class.load_from_checkpoint(
-            trainer.checkpoint_callback.best_model_path)  # Load best checkpoint after training
+        # model = model_class.load_from_checkpoint(
+        #     trainer.checkpoint_callback.best_model_path)  # Load best checkpoint after training
 
     if test_loader is not None:
-        model_paths = [(trainer.checkpoint_callback.best_model_path, "best")]
+        # model_paths = [(trainer.checkpoint_callback.best_model_path, "best")]
+        model_paths = []
         if save_last_model:
             model_paths += [(trainer.checkpoint_callback.last_model_path, "last")]
         for file_path, prefix in model_paths:
@@ -208,7 +209,7 @@ if __name__ == '__main__':
     # parser.add_argument('--causal_encoder_checkpoint', type=str, required=True)
     parser.add_argument('--cluster', action="store_true")
     parser.add_argument('--seed', type=int, default=42)
-    parser.add_argument('--max_epochs', type=int, default=200)
+    parser.add_argument('--max_epochs', type=int, default=2)
     parser.add_argument('--debug', action='store_true')
     parser.add_argument('--offline', action='store_true')
     parser.add_argument('--batch_size', type=int, default=512)
