@@ -113,7 +113,7 @@ class AutoregressivePrior(nn.Module):
         if not hard:
             return torch.softmax(self.causal_assignment_net.params, dim=-1)
         else:
-            return F.one_hot(torch.argmax(self.causal_assignment_net.params, dim=-1), num_classes=self.target_params.shape[-1])
+            return F.one_hot(torch.argmax(self.causal_assignment_net.params, dim=-1), num_classes=self.causal_assignment_net.params.shape[-1])
 
 if __name__ == '__main__':
     x = torch.rand(4)
