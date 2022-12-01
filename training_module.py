@@ -39,6 +39,7 @@ class CITRISVAE(pl.LightningModule):
                        no_encoder_decoder=False,
                        use_flow_prior=True,
                        cluster_logging=False,
+                       causal_var_info=None,
                        **kwargs):
         """
         Parameters
@@ -221,15 +222,15 @@ class CITRISVAE(pl.LightningModule):
         self.log('train_loss', loss)
         return loss
 
-    # def validation_step(self, batch, batch_idx):
-    #     imgs, *_ = batch
-    #     loss = self.triplet_evaluation(batch, mode='val')
-    #     self.log('val_loss', loss)
+    def validation_step(self, batch, batch_idx):
+        # imgs, *_ = batch
+        # loss = self.triplet_evaluation(batch, mode='val')
+        self.log('val_loss', 0.0)
 
-    # def test_step(self, batch, batch_idx):
-    #     imgs, *_ = batch
-    #     loss = self.triplet_evaluation(batch, mode='test')
-    #     self.log('test_loss', loss)
+    def test_step(self, batch, batch_idx):
+        imgs, *_ = batch
+        loss = self.triplet_evaluation(batch, mode='test')
+        self.log('test_loss', 0.0)
 
     # def validation_epoch_end(self, *args, **kwargs):
     #     # Logging at the end of validation

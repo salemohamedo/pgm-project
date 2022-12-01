@@ -147,8 +147,7 @@ class PositionLayer(nn.Module):
 
 def create_pos_grid(shape, device, stack_dim=-1):
     pos_x, pos_y = torch.meshgrid(torch.linspace(-1, 1, shape[0], device=device),
-                                  torch.linspace(-1, 1, shape[1], device=device),
-                                  indexing='ij')
+                                  torch.linspace(-1, 1, shape[1], device=device)) #, indexing='ij')
     pos = torch.stack([pos_x, pos_y], dim=stack_dim)
     return pos
 

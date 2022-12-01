@@ -90,7 +90,7 @@ class InterventionClassifier(nn.Module):
         loss2_input = loss2_input.flatten(0, 2)
         loss2_outs = self.exp_intrv_classifier(loss2_input)
         
-        loss2_targets = torch.where(loss_mask, intrv_targets, self.intrv_marginal.unsqueeze(0))
+        loss2_targets = torch.where(loss_mask, intrv_targets, self.intrv_marginal.unsqueeze(0).float())
         loss_z = nn.functional.binary_cross_entropy_with_logits(loss2_outs, loss2_targets, reduction='none')
         loss_mask = loss_mask.float()
         loss_z = loss_z * (n_assignments * loss_mask + (1 - loss_mask)) ## Weight self-prediction higher, following authors

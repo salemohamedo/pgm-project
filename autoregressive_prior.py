@@ -1,5 +1,6 @@
 import torch.nn as nn
 import torch
+import torch.nn.functional as F
 
 def kl_divergence_normal(mu1, mu2, log_std1, log_std2):
     return log_std2 - log_std1 + (torch.exp(2*log_std1) + torch.square(mu1 - mu2))/(2*torch.exp(2*log_std2)) - 0.5
@@ -113,7 +114,7 @@ class AutoregressivePrior(nn.Module):
         if not hard:
             return torch.softmax(self.causal_assignment_net.params, dim=-1)
         else:
-            return F.one_hot(torch.argmax(self.causal_assignment_net.params, dim=-1), num_classes=self.target_params.shape[-1])
+            return F.one_hot(torch.argmax(self.causal_assignment_net.params, dim=-1), num_classes=self.causal_assignment_net.params.shape[-1])
 
 if __name__ == '__main__':
     x = torch.rand(4)

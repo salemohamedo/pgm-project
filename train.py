@@ -221,7 +221,7 @@ if __name__ == '__main__':
     parser.add_argument('--lr', type=float, default=1e-3)
     parser.add_argument('--warmup', type=int, default=100)
     parser.add_argument('--imperfect_interventions', action='store_true')
-    parser.add_argument('--check_val_every_n_epoch', type=int, default=-1)
+    parser.add_argument('--check_val_every_n_epoch', type=int, default=5)
     parser.add_argument('--logger_name', type=str, default='')
     parser.add_argument('--files_to_save', type=str, nargs='+', default='')
 
@@ -270,6 +270,8 @@ if __name__ == '__main__':
     check_val_every_n_epoch = model_args.pop('check_val_every_n_epoch')
     if check_val_every_n_epoch <= 0:
         check_val_every_n_epoch = 2 if not args.cluster else 25
+
+    print(datasets['train'])
     train_model(model_class=model_class,
                 train_loader=data_loaders['train'],
                 val_loader=data_loaders['val_triplet'],
@@ -283,4 +285,5 @@ if __name__ == '__main__':
                 var_names=datasets['train'].target_names(),
                 save_last_model=True,
                 cluster_logging=args.cluster,
+                causal_var_info=datasets["train"].get_causal_var_info(),
                 **model_args)
