@@ -204,7 +204,7 @@ class CorrelationMetricsLogCallback(pl.Callback):
         log_matrix(r2_matrix, trainer, 'r2_matrix' + self.log_postfix)
         self._log_heatmap(trainer=trainer, 
                           values=r2_matrix, 
-                          tag='r2_matrix',
+                          tag='r2_matrix_' + self.log_postfix,
                           title='R^2 Matrix',
                           xticks=[key for key in encoder.hparams.causal_var_info],
                           pl_module=pl_module)
@@ -244,7 +244,7 @@ class CorrelationMetricsLogCallback(pl.Callback):
         log_matrix(pearson_matrix, trainer, 'pearson_matrix' + self.log_postfix)
         self._log_heatmap(trainer=trainer, 
                           values=pearson_matrix, 
-                          tag='pearson_matrix',
+                          tag='pearson_matrix_' + self.log_postfix,
                           title='Pearson Matrix',
                           xticks=[key for key in encoder.hparams.causal_var_info],
                           pl_module=pl_module)
@@ -289,7 +289,7 @@ class CorrelationMetricsLogCallback(pl.Callback):
         log_matrix(spearman_matrix, trainer, 'spearman_matrix' + self.log_postfix)
         self._log_heatmap(trainer=trainer, 
                           values=spearman_matrix, 
-                          tag='spearman_matrix',
+                          tag='spearman_matrix_' + self.log_postfix,
                           title='Spearman\'s Rank Correlation Matrix',
                           xticks=[key for key in encoder.hparams.causal_var_info],
                           pl_module=pl_module)
