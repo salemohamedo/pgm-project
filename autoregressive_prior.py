@@ -5,6 +5,9 @@ import torch.nn.functional as F
 def kl_divergence_normal(mu1, mu2, log_std1, log_std2):
     return log_std2 - log_std1 + (torch.exp(2*log_std1) + torch.square(mu1 - mu2))/(2*torch.exp(2*log_std2)) - 0.5
 
+def kl_divergence_normal(mu1, mu2, log_std1, log_std2):
+    return log_std2 - log_std1 + (torch.exp(2*log_std1) + torch.square(mu1 - mu2))/(2*torch.exp(2*log_std2)) - 0.5
+
 class MaskedLinear(nn.Linear):
     def __init__(self, n_blocks, block_in_dim, block_out_dim, diag=False):
         super().__init__(in_features=n_blocks*block_in_dim, out_features=n_blocks*block_out_dim, bias=True)
@@ -21,9 +24,11 @@ class MaskedLinear(nn.Linear):
         return nn.functional.linear(x, self.weight*self.mask, self.bias)
 
 class CausalAssignmentNet(nn.Module):
-    def __init__(self, n_latents, n_causal_vars, temp=1.0):
+    def __init__(self, lambda_reg, n_latents, n_causal_vars, temp=1.0):
         super().__init__()
-        self.params = nn.Parameter(torch.randn(n_latents, n_causal_vars))
+        self.params = nn.Parameter(torch.zeros(n_latents, n_causal_vars))
+        if lambda_reg <= 0:
+            self.params.data[:,-1] = -9e15
         self.temp = temp
 
     def forward(self, batch_size, seq_len=None):
@@ -38,8 +43,10 @@ class CausalAssignmentNet(nn.Module):
         return torch.softmax(self.params, dim=-1)
 
 class AutoregressivePrior(nn.Module):
-    def __init__(self, causal_assignment_net, n_latents, n_causal_vars, n_hid_per_latent):
+    def __init__(self, causal_assignment_net, n_latents, n_causal_vars, n_hid_per_latent, lambda_reg, imperfect_interventions):
         super().__init__()
+        self.lambda_reg = lambda_reg
+        self.imperfect_interventions = imperfect_interventions
         self.causal_assignment_net = causal_assignment_net
         ## Encodes z_t
         self.context_encoder = nn.Linear(n_latents, n_hid_per_latent*n_latents)
@@ -65,7 +72,8 @@ class AutoregressivePrior(nn.Module):
         """
         context_emb = self.context_encoder(z_t).unsqueeze(1) ## [batch_size, 1, n_latents*n_hid_per_latent]
         ## With perfect interventions, we don't need context for intervened variable
-        context_emb = context_emb * (1 - intrv.unsqueeze(-1))
+        if not self.imperfect_interventions:
+            context_emb = context_emb * (1 - intrv.unsqueeze(-1))
 
         ## Transform intervention vector to matrix where off-diagonal elements are masked (set to -1)
         ## e.g. [0, 1] -> [[0, -1]
@@ -101,10 +109,13 @@ class AutoregressivePrior(nn.Module):
         ## Compute KL(q(z_t1|x_t1)||p(z_t1|z_t, I_t))
         kl = kl_divergence_normal(mu1=z_t1_mean.unsqueeze(1), mu2=prior_mu, log_std1=z_t1_logstd.unsqueeze(1), log_std2=prior_logstd)
 
-        ## Note add psi lambda reg?
-
         ## Marginalize over all possible assignments
         causal_assign_probs = self.causal_assignment_net.get_softmax_dist()
+
+        ## Note add psi lambda reg?
+        if self.lambda_reg > 0.0:
+            causal_assign_probs = torch.cat([causal_assign_probs[:,-1:], causal_assign_probs[:,:-1] * (1 - self.lambda_reg)], dim=-1)
+
         kl = (kl * causal_assign_probs.permute(1, 0).unsqueeze(0))
         return kl.sum(dim=[1,2])
     
