@@ -4,16 +4,16 @@ from copy import deepcopy
 from autoregressive_prior import CausalAssignmentNet
 
 class InterventionClassifier(nn.Module):
-    def __init__(self, causal_assignment_net: CausalAssignmentNet, n_latents, n_causal_vars, hidden_dim, momentum):
+    def __init__(self, causal_assignment_net: CausalAssignmentNet, n_latents, n_causal_vars, hidden_dim, momentum, use_norm):
         super().__init__()
-
-        self.causal_assignment_net = causal_assignment_net
+        norm = lambda c: (nn.LayerNorm(c) if use_norm else nn.Identity())
+        # self.causal_assignment_net = causal_assignment_net
         self.n_causal_vars = n_causal_vars
         self.momentum = momentum
 
         self.intrv_classifier = nn.Sequential(
             nn.Linear(3*n_latents, 2*hidden_dim),
-            nn.LayerNorm(2*hidden_dim),
+            norm(2*hidden_dim),
             nn.SiLU(),
             nn.Linear(2*hidden_dim, self.n_causal_vars)
         )
@@ -42,7 +42,7 @@ class InterventionClassifier(nn.Module):
             self.intrv_marginal /= self.n_training_steps + 1
             self.n_training_steps += 1
 
-    def forward(self, z_samples, intrv_targets):
+    def forward(self, z_samples, intrv_targets, transition_prior):
         """
             z_samples : torch.FloatTensor, shape [batch_size, seq_len, n_latents]
             intrv_targets : torch.FloatTensor, shape [batch_size, seq_len-1,  n_causal_vars]
@@ -61,7 +61,9 @@ class InterventionClassifier(nn.Module):
         z_samples = z_samples.unsqueeze(2).expand(-1, -1,  n_assignments, -1)
 
         ## Sample latent-to-causal assignments
-        causal_assignment = self.causal_assignment_net(batch_size=batch_size, seq_len=seq_len)
+        # causal_assignment = self.causal_assignment_net(batch_size=batch_size, seq_len=seq_len)
+        causal_assignment = nn.functional.gumbel_softmax(transition_prior.target_params[None].expand(batch_size, seq_len, -1, -1), 
+                                             tau=1.0, hard=True)
         ## Add extra variable assigned to all latents
         causal_assignment = torch.cat([causal_assignment, causal_assignment.new_ones(causal_assignment.shape[:-1] + (1,))], dim=-1)
         causal_assignment = causal_assignment.permute(0, 1, 3, 2) ## [batch_size, seq_len, n_assignments, n_latents]

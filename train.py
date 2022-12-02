@@ -179,9 +179,9 @@ def train_model(model_class, train_loader, val_loader,
 
     if test_loader is not None:
         # model_paths = [(trainer.checkpoint_callback.best_model_path, "best")]
+        # if save_last_model:
+        #     model_paths += [(trainer.checkpoint_callback.last_model_path, "last")]
         model_paths = []
-        if save_last_model:
-            model_paths += [(trainer.checkpoint_callback.last_model_path, "last")]
         for file_path, prefix in model_paths:
             model = model_class.load_from_checkpoint(file_path)
             for c in callbacks:

@@ -113,25 +113,47 @@ class CITRISVAE(pl.LightningModule):
                                     num_blocks=self.hparams.decoder_num_blocks,
                                     act_fn=lambda: nn.ReLU())
         # CausalAssignmentNet
-        self.causal_assignment_net = CausalAssignmentNet(
-            n_latents=self.hparams.num_latents,
-            n_causal_vars=self.hparams.num_causal_vars + 1)
+        # self.causal_assignment_net = CausalAssignmentNet(
+        #     n_latents=self.hparams.num_latents,
+        #     n_causal_vars=self.hparams.num_causal_vars + 1)
+        self.causal_assignment_net = None
 
-        # Transition prior
-        self.prior_t1 = AutoregressivePrior(
-            causal_assignment_net=self.causal_assignment_net, 
-            n_latents=self.hparams.num_latents,
-            n_causal_vars=self.hparams.num_causal_vars + 1, 
-            n_hid_per_latent=self.hparams.c_hid)
-
+        # # Transition prior
+        # self.prior_t1 = AutoregressivePrior(
+        #     causal_assignment_net=self.causal_assignment_net, 
+        #     n_latents=self.hparams.num_latents,
+        #     n_causal_vars=self.hparams.num_causal_vars + 1, 
+        #     n_hid_per_latent=16)
+        from CITRIS_transition_prior import TransitionPrior
+        self.prior_t1 = TransitionPrior(num_latents=self.hparams.num_latents,
+                                        num_blocks=self.hparams.num_causal_vars,
+                                        c_hid=self.hparams.c_hid,
+                                        imperfect_interventions=self.hparams.imperfect_interventions,
+                                        lambda_reg=self.hparams.lambda_reg,
+                                        autoregressive_model=True,
+                                        gumbel_temperature=self.hparams.classifier_gumbel_temperature)
+        print(self.hparams.c_hid, self.hparams.num_latents)
+        # print(self.prior_t1)
         # Target classifier
         self.intv_classifier = InterventionClassifier(
             causal_assignment_net=self.causal_assignment_net,
             n_latents=self.hparams.num_latents,
             n_causal_vars=self.hparams.num_causal_vars,
             hidden_dim=self.hparams.c_hid,
-            momentum=self.hparams.classifier_momentum)
-
+            momentum=self.hparams.classifier_momentum,
+            use_norm=self.hparams.classifier_use_normalization)
+        # from CITRIS_target_classifier import TargetClassifier
+        # self.intv_classifier = TargetClassifier(num_latents=self.hparams.num_latents,
+        #                                 num_blocks=self.hparams.num_causal_vars,
+        #                                 c_hid=self.hparams.c_hid,
+        #                                 num_layers=self.hparams.classifier_num_layers,
+        #                                 act_fn=lambda: nn.SiLU(),
+        #                                 var_names=self.hparams.var_names,
+        #                                 momentum_model=self.hparams.classifier_momentum,
+        #                                 gumbel_temperature=self.hparams.classifier_gumbel_temperature,
+        #                                 use_normalization=self.hparams.classifier_use_normalization,
+        #                                 use_conditional_targets=self.hparams.classifier_use_conditional_targets)
+        print(self.intv_classifier)
         # Warmup scheduler for KL (if selected)
         self.kld_scheduler = SineWarmupScheduler(kld_warmup)
         # Logging
@@ -184,11 +206,17 @@ class CITRISVAE(pl.LightningModule):
         z_sample, z_mean, z_logstd, x_rec = [t.unflatten(0, (imgs.shape[0], -1)) for t in [z_sample, z_mean, z_logstd, x_rec]]
 
         # Calculate KL divergence between every pair of frames
-        kld_t1_all = self.prior_t1.compute_kl_loss(z_t=z_mean[:,:-1].flatten(0, 1), 
-                                                     intrv=target.flatten(0, 1), 
-                                                     z_t1_mean=z_mean[:,1:].flatten(0, 1), 
-                                                     z_t1_logstd=z_logstd[:,1:].flatten(0, 1), 
-                                                     z_t1_samples=z_sample[:,1:].flatten(0, 1))
+        # kld_t1_all = self.prior_t1.compute_kl_loss(z_t=z_mean[:,:-1].flatten(0, 1), 
+        #                                              intrv=target.flatten(0, 1), 
+        #                                              z_t1_mean=z_mean[:,1:].flatten(0, 1), 
+        #                                              z_t1_logstd=z_logstd[:,1:].flatten(0, 1), 
+        #                                              z_t1_samples=z_sample[:,1:].flatten(0, 1))
+    
+        kld_t1_all = self.prior_t1.kl_divergence(z_t=z_mean[:,:-1].flatten(0, 1), 
+                                            target=target.flatten(0, 1), 
+                                            z_t1_mean=z_mean[:,1:].flatten(0, 1), 
+                                            z_t1_logstd=z_logstd[:,1:].flatten(0, 1), 
+                                            z_t1_sample=z_sample[:,1:].flatten(0, 1))
         kld_t1_all = kld_t1_all.unflatten(0, (imgs.shape[0], -1)).sum(dim=1)
 
         # Calculate reconstruction loss
@@ -203,8 +231,12 @@ class CITRISVAE(pl.LightningModule):
         # Add target classifier loss
         loss_model, loss_z = self.intv_classifier(z_samples=z_sample,
                                                 #   logger=self if not self.hparams.cluster_logging else None, 
-                                                  intrv_targets=target)
-                                                #   transition_prior=self.prior_t1)
+                                                  intrv_targets=target,
+                                                  transition_prior=self.prior_t1)
+        # loss_model, loss_z = self.intv_classifier(z_sample=z_sample,
+        #                                     logger=self if not self.hparams.cluster_logging else None, 
+        #                                     target=target,
+        #                                     transition_prior=self.causal_assignment_net)
         loss = loss + (loss_model + loss_z) * self.hparams.beta_classifier
 
         # Logging
