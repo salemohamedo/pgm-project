@@ -278,6 +278,32 @@ class CITRISVAE(torch.nn.Module):
             latents = latents.flatten(0, 1)
         return inps, latents
 
+    def generate_triplet(self, imgs, source):
+        # get pair of images
+        if imgs.shape[1] > 2:
+            imgs = imgs[:, :2]
+
+        # Here seq_len is 2
+        b, seq_len, c, h, w = imgs.shape
+        # Encode
+        z_mean, _ = self.encoder(imgs.reshape(b*seq_len, c, h, w))
+
+        # Use z_mean as sample for deterministic decoding
+        z_mean = z_mean.view(b, seq_len, -1)
+
+        target_assignment = self.transition_prior.get_target_assignment(hard=True)
+        if source.shape[-1] + 1 == target_assignment.shape[-1]:  # No-variables missing
+            source = torch.cat([source, source[..., -1:] * 0.0], dim=-1)
+        elif target_assignment.shape[-1] > source.shape[-1]:
+            target_assignment = target_assignment[..., :source.shape[-1]]
+
+        mask = (target_assignment[None, :, :] * (1 - source[:, None, :])).sum(dim=-1)
+        triplet_samples = mask * z_mean[:, 0] + (1 - mask) * z_mean[:, 1]
+
+        generated_triplet = self.decoder(triplet_samples)
+
+        return generated_triplet
+
     def evaluate_with_triplet(self, dataloader, split, epoch=None):
         self.encoder.eval()
         self.decoder.eval()
@@ -290,33 +316,12 @@ class CITRISVAE(torch.nn.Module):
         avg_norm_dist = 0.
         for batch in dataloader:
             imgs, source, latents = batch
-            # get pair of images
-            if imgs.shape[1] > 2:
-                imgs = imgs[:, :2]
-
             with torch.no_grad():
                 imgs = imgs.to(self.device)
                 source = source.to(self.device)
                 latents = latents.to(self.device)
 
-                # Here seq_len is 2
-                b, seq_len, c, h, w = imgs.shape
-                # Encode
-                z_mean, _ = self.encoder(imgs.view(b*seq_len, c, h, w))
-
-                # Use z_mean as sample for deterministic decoding
-                z_mean = z_mean.view(b, seq_len, -1)
-
-                target_assignment = self.transition_prior.get_target_assignment(hard=True)
-                if source.shape[-1] + 1 == target_assignment.shape[-1]:  # No-variables missing
-                    source = torch.cat([source, source[..., -1:] * 0.0], dim=-1)
-                elif target_assignment.shape[-1] > source.shape[-1]:
-                    target_assignment = target_assignment[..., :source.shape[-1]]
-
-                mask = (target_assignment[None, :, :] * (1 - source[:, None, :])).sum(dim=-1)
-                triplet_samples = mask * z_mean[:, 0] + (1 - mask) * z_mean[:, 1]
-
-                generated_triplet = self.decoder(triplet_samples)
+                generated_triplet = self.generate_triplet(imgs, source)
 
                 if latents is not None and self.pretrained_causal_model is not None: 
                     v_dict = self.pretrained_causal_model.causal_net(generated_triplet)

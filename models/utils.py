@@ -341,7 +341,7 @@ def visualize_triplet_reconstruction(model, img_triplet, labels, sources, datase
     """ Plots the triplet predictions against the ground truth for a VAE/Flow """
     sources = sources[0].to(model.device)
     labels = labels[-1]
-    triplet_rec = model.triplet_prediction(img_triplet[None], sources[None])
+    triplet_rec = model.generate_triplet(img_triplet[None], sources[None])
     triplet_rec = triplet_rec.squeeze(dim=0)
     if labels.dtype == torch.long:
         triplet_rec = triplet_rec.argmax(dim=0)
@@ -392,9 +392,9 @@ class ImageLog:
                 return
             wandb.log({f'{split}_{tag}': wandb.Image(fig)}, step=epoch)
             plt.close(fig)
-
-        if hasattr(model, 'transition_prior'):
-            log_fig('transition_prior', plot_target_assignment(model.transition_prior, dataset=self.dataset))
+        # TODO: need to fix it
+        # if hasattr(model, 'transition_prior'):
+        #     log_fig('transition_prior', plot_target_assignment(model.transition_prior, dataset=self.dataset))
 
         if self.imgs is not None:
             images = self.imgs.to(model.device)
@@ -410,7 +410,7 @@ class ImageLog:
                 log_fig(f'reconstruction_{i}', visualize_reconstruction(model, images[i], labels[i], self.dataset))
             
         # TODO: need to fix it
-        # if hasattr(model, 'transition_prior'):
-        #     if full_imgs is not None:
-        #         for i in range(min(4, full_imgs.shape[0])):
-        #             log_fig(f'triplet_visualization_{i}', visualize_triplet_reconstruction(model, full_imgs[i], full_labels[i], [e[i] for e in self.extra_inputs], dataset=self.dataset))
+        if hasattr(model, 'transition_prior'):
+            if full_imgs is not None:
+                for i in range(min(4, full_imgs.shape[0])):
+                    log_fig(f'triplet_visualization_{i}', visualize_triplet_reconstruction(model, full_imgs[i], full_labels[i], [e[i] for e in self.extra_inputs], dataset=self.dataset))
