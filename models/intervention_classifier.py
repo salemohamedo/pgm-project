@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 from copy import deepcopy
-from autoregressive_prior import CausalAssignmentNet
+from models.autoregressive_prior import CausalAssignmentNet
 
 class InterventionClassifier(nn.Module):
     def __init__(self, causal_assignment_net, n_latents, n_causal_vars, hidden_dim, momentum, use_norm):

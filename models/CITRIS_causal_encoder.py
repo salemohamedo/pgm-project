@@ -8,8 +8,8 @@ import numpy as np
 from collections import OrderedDict, defaultdict
 import matplotlib.pyplot as plt
 
-from utils import CosineWarmupScheduler, get_act_fn
-from CITRIS_encoder_decoder import Encoder
+from models.utils import CosineWarmupScheduler, get_act_fn
+from models.CITRIS_encoder_decoder import Encoder
 
 
 class TanhScaled(nn.Module):
