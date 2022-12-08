@@ -26,7 +26,7 @@ class CausalNet(nn.Module):
                                    c_in=max(3, c_in),
                                    c_hid=c_hid,
                                    width=img_width,
-                                   act_fn=lambda: nn.ReLU(),
+                                   act_fn=lambda: nn.SiLU(),
                                    variational=False)
         else:
             self.encoder = nn.Sequential(

@@ -15,6 +15,7 @@ import numpy as np
 from collections import OrderedDict
 from models.utils import CosineWarmupScheduler, ImageLog
 from models.causal_model import CausalNet
+from tqdm.auto import tqdm
 
 
 class CITRISVAE(torch.nn.Module):
@@ -32,7 +33,7 @@ class CITRISVAE(torch.nn.Module):
                         c_hid=args.c_hid, 
                         is_mlp=False, 
                         device=device)
-            self.pretrained_causal_model.causal_net.load_state_dict(torch.load(args.pretrained_causal_model_path))
+            self.pretrained_causal_model.causal_net.load_state_dict(torch.load(args.pretrained_causal_model_path)["state_dict"])
 
         # VAE Encoder, Decoder
         if self.args.img_width == 32:
@@ -84,17 +85,17 @@ class CITRISVAE(torch.nn.Module):
         transition_prior_params = [p for n, p in self.transition_prior.named_parameters() if "causal_assignment_net" not in n and p.requires_grad]
 
         # Optimizer for training the model
-        # self.optimizer = optim.AdamW([{'params': self.intervention_classifier.parameters(), 'lr': self.args.classifier_lr, 'weight_decay': 1e-4},
-        #                               {'params': self.encoder.parameters()},
-        #                               {'params': self.decoder.parameters()},
-        #                               {'params': transition_prior_params}
-        #                               ], lr=self.args.lr, weight_decay=0.0)
-
-        self.optimizer = optim.AdamW([{'params': self.intervention_classifier.parameters()},
+        self.optimizer = optim.AdamW([{'params': self.intervention_classifier.parameters(), 'lr': self.args.classifier_lr, 'weight_decay': 1e-4},
                                       {'params': self.encoder.parameters()},
                                       {'params': self.decoder.parameters()},
-                                      {'params': transition_prior_params} 
+                                      {'params': transition_prior_params}
                                       ], lr=self.args.lr, weight_decay=0.0)
+
+        # self.optimizer = optim.AdamW([{'params': self.intervention_classifier.parameters()},
+        #                               {'params': self.encoder.parameters()},
+        #                               {'params': self.decoder.parameters()},
+        #                               {'params': transition_prior_params} 
+        #                               ], lr=self.args.lr, weight_decay=0.0)
 
 
         # Learning rate schedular for  model optimizer
@@ -131,7 +132,7 @@ class CITRISVAE(torch.nn.Module):
 
         return loss, rec_loss.mean(), loss_model, loss_z, kld_t1_all.mean() / (seq_len-1)
 
-    def train(self, train_data_loader, val_data_loader, correlation_dataset, num_epochs, dataset_train):
+    def train(self, train_data_loader, val_data_loader, correlation_dataset, num_epochs, dataset_train, checkpoint_dir):
 
         image_logger = ImageLog(exmp_inputs=next(iter(val_data_loader)), dataset=dataset_train)
         iteration = 0
@@ -139,6 +140,7 @@ class CITRISVAE(torch.nn.Module):
         self.decoder.to(self.device)
         self.intervention_classifier.to(self.device)
         self.transition_prior.to(self.device)
+        best_dist = 9e10
         for epoch in range(num_epochs):
             self.encoder.train()
             self.decoder.train()
@@ -148,7 +150,7 @@ class CITRISVAE(torch.nn.Module):
             for batch in train_data_loader:
                 imgs, target = batch
                 imgs = imgs.to(self.device)
-                target = target.to(self.device)
+                target = target.float().to(self.device)
 
                 b, seq_len, c, h, w = imgs.shape
 
@@ -169,22 +171,34 @@ class CITRISVAE(torch.nn.Module):
                 self.lr_scheduler.step()
                 iteration += 1  
 
-                loss_avg += loss.item() * imgs.shape[0]
-                rec_loss_avg += rec_loss.item() * imgs.shape[0]
-                loss_model_avg += loss_model.item() * imgs.shape[0]
-                loss_model_z_avg += loss_model_z.item() * imgs.shape[0]
-                kld_t1_avg += kld_t1.item() * imgs.shape[0]
+                loss_avg += loss.item()
+                rec_loss_avg += rec_loss.item() 
+                loss_model_avg += loss_model.item() 
+                loss_model_z_avg += loss_model_z.item()
+                kld_t1_avg += kld_t1.item()
 
-            loss_avg /= len(train_data_loader.dataset)
-            rec_loss_avg /= len(train_data_loader.dataset)
-            loss_model_avg /= len(train_data_loader.dataset)
-            loss_model_z_avg /= len(train_data_loader.dataset)
-            kld_t1_avg /= len(train_data_loader.dataset)
+            loss_avg /= len(train_data_loader)
+            rec_loss_avg /= len(train_data_loader)
+            loss_model_avg /= len(train_data_loader)
+            loss_model_z_avg /= len(train_data_loader)
+            kld_t1_avg /= len(train_data_loader)
 
             # Do triplet evaluation on validation set
-            val_avg_loss, val_avg_norm_dist = 0., 0.
-            if epoch % self.args.check_triplet_every_n_epoch == 0:
-                val_avg_loss, val_avg_norm_dist = self.evaluate_with_triplet(val_data_loader, split="val", epoch=epoch)
+            val_avg_loss, val_avg_norm_dist = self.evaluate_with_triplet(val_data_loader, split="val", epoch=epoch)
+
+            if os.path.exists(checkpoint_dir):
+                if val_avg_norm_dist < best_dist:
+                    best_dist = val_avg_norm_dist
+                    PATH = os.path.join(checkpoint_dir, f"best.pt")
+                else:
+                    PATH = os.path.join(checkpoint_dir, f"last.pt")
+                torch.save({
+                    'encoder': self.encoder.state_dict(),
+                    'decoder': self.decoder.state_dict(),
+                    'causal_assignment_net': self.causal_assignment_net.state_dict(),
+                    'intervention_classifier': self.intervention_classifier.state_dict(),
+                    }, PATH)
+
 
             wandb.log({f'train_loss_avg': loss_avg}, step=epoch)
             wandb.log({f'train_rec_loss': rec_loss_avg}, step=epoch)
@@ -198,7 +212,6 @@ class CITRISVAE(torch.nn.Module):
 
             # Evaluate and create Correlation matrix
             if epoch % self.args.check_correlation_every_n_epoch == 0:
-                print("evalute-Correlation with probing")
                 self.evaluate_correlation(correlation_dataset, "val", self.args.logdir, epoch)
                 # Visualize Reconstruction
                 image_logger.visualize(self, split="val", epoch=epoch)
@@ -246,7 +259,7 @@ class CITRISVAE(torch.nn.Module):
 
         causal_model = CausalModel(self.causal_var_info, self.args.img_width, self.args.num_latents*2, self.args.c_hid, is_mlp=True, device=self.device)
 
-        train_loader = data.DataLoader(train_dataset, shuffle=True, drop_last=False, batch_size=512)
+        train_loader = data.DataLoader(train_dataset, shuffle=True, drop_last=False, batch_size=self.args.batch_size)
 
         causal_model.create_optimizer(lr=self.args.probe_lr, weight_decay=0., warmup=0, max_iters=-1)
         causal_model.train(self.args.probe_num_epochs, train_loader, test_loader=None, target_assignment=target_assignment, prepare_input_fn=self._prepare_input)
@@ -337,17 +350,17 @@ class CITRISVAE(torch.nn.Module):
                             wandb.log({f'triplet_{split}_{key}_norm_dist': norm_dists[key].mean()})
                     loss, norm_dist = 0., 0.
                     for key in losses:
-                        loss += losses[key]
+                        loss += losses[key] / len(losses)
                     for key in norm_dists:
-                        norm_dist += norm_dists[key].mean()
+                        norm_dist += norm_dists[key].mean() / len(norm_dists)
                 else:
                     return 0.0, 0.0
 
                 avg_loss += loss
                 avg_norm_dist += norm_dist
 
-        avg_loss /= len(dataloader.dataset)
-        avg_norm_dist /= len(dataloader.dataset)
+        avg_loss /= len(dataloader)
+        avg_norm_dist /= len(dataloader)
 
         return avg_loss, avg_norm_dist
 
@@ -438,11 +451,11 @@ class CausalModel(nn.Module):
                 for key in norm_dists:
                     norm_dist += norm_dists[key].mean()
 
-                avg_loss += loss.item() * inps.shape[0]
-                avg_norm_dist += norm_dist * inps.shape[0]
+                avg_loss += loss.item()
+                avg_norm_dist += norm_dist.item()
 
-            avg_loss /= len(test_loader.dataset)
-            avg_norm_dist /= len(test_loader.dataset)
+            avg_loss /= len(test_loader)
+            avg_norm_dist /= len(test_loader)
 
         return avg_loss, avg_norm_dist
 
@@ -450,8 +463,9 @@ class CausalModel(nn.Module):
         if target_assignment is not None:
             target_assignment = target_assignment.to(self.device)
         self.causal_net.to(self.device)
-        best_dist = 999999999.0
-        for epoch in range(num_epochs):
+        best_dist = 9e10
+        pbar = tqdm(range(num_epochs), leave=False, desc=f'Training correlation encoder')
+        for epoch in pbar:
             train_avg_loss = 0
             train_avg_norm_dist = 0
             self.causal_net.train()
@@ -469,9 +483,9 @@ class CausalModel(nn.Module):
 
                 loss, norm_dist = 0., 0.
                 for key in losses:
-                    loss += losses[key]
+                    loss += losses[key] / len(losses)
                 for key in norm_dists:
-                    norm_dist += norm_dists[key].mean()
+                    norm_dist += norm_dists[key].mean() / len(norm_dists)
 
                 self.optimizer.zero_grad()
                 loss.backward() 
@@ -480,10 +494,10 @@ class CausalModel(nn.Module):
                 if self.lr_scheduler is not None:
                     self.lr_scheduler.step()
 
-                train_avg_loss += loss.item() * inps.shape[0]
-                train_avg_norm_dist += norm_dist * inps.shape[0]
-            train_avg_loss /= len(trainloader.dataset)
-            train_avg_norm_dist /= len(trainloader.dataset)
+                train_avg_loss += loss.item()
+                train_avg_norm_dist += norm_dist
+            train_avg_loss /= len(trainloader)
+            train_avg_norm_dist /= len(trainloader)
 
             # Do not use in the training of linear probe evaluation
             if target_assignment is None:
@@ -504,4 +518,4 @@ class CausalModel(nn.Module):
                 wandb.log({f'val_avg_loss': test_avg_loss}, step=epoch)
                 wandb.log({f'val_avg_norm_dist': test_avg_norm_dist}, step=epoch)
             else:
-                print(f'Epoch {epoch:3d} | train_avg_loss {train_avg_loss:.4f} | train_avg_norm_dist {train_avg_norm_dist:.4f}')
+                pbar.set_description(f'Correlation Evaluation: Epoch {epoch:3d} | train_avg_loss {train_avg_loss:.4f} | train_avg_norm_dist {train_avg_norm_dist:.4f}')

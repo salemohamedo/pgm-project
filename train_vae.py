@@ -5,31 +5,28 @@ import argparse
 import json
 import torch 
 from torch.utils.data import DataLoader
-from datasets import InterventionalPongDataset
-import copyfile
-from train_causal_net import DATASET_NAMES
+from datasets import Causal3DDataset, InterventionalPongDataset, VoronoiDataset
 import numpy as np
 import wandb
 from models.model import CITRISVAE
 
+DATASET_NAMES = ["pong","causal3d", "voronoi"] #["ball_in_boxes", "pong", "causal3d", "pinball", "voronoi"]
 
 def load_datasets(args):
-    # if args.dataset_name not in DATASET_NAMES:
-    #     raise ValueError(f"Datset name {args.dataset_name} not found!")
+    if args.dataset_name not in DATASET_NAMES:
+        raise ValueError(f"Datset name {args.dataset_name} not found!")
 
-    # if 'ball_in_boxes' == args.dataset_name:
-    #     DataClass = BallInBoxesDataset
-    # elif 'pong' == args.dataset_name:
-    #     DataClass = InterventionalPongDataset
-    # elif 'causal3d' == args.dataset_name:
-    #     DataClass = Causal3DDataset
-    # elif 'voronoi' == args.dataset_name:
-    #     DataClass = VoronoiDataset
+    if 'pong' == args.dataset_name:
+        DataClass = InterventionalPongDataset
+    elif 'causal3d' == args.dataset_name:
+        DataClass = Causal3DDataset
+    elif 'voronoi' == args.dataset_name:
+        DataClass = VoronoiDataset
     # elif 'pinball' == args.dataset_name:
     #     DataClass = PinballDataset
+    # elif 'ball_in_boxes' == args.dataset_name:
+    #     DataClass = BallInBoxesDataset
 
-    DataClass = InterventionalPongDataset
-    DataClass = InterventionalPongDataset
     dataset_args = {}
 
     test_args = lambda train_set: {'causal_vars': train_set.target_names_l}
@@ -93,11 +90,11 @@ def main(args):
 
     datasets, data_loaders = load_datasets(args)
 
-    checkpoint_dir = os.path.join(args.output_dir, "citris_vae", args.dataset_name, "checkpoints")
+    checkpoint_dir = os.path.join(args.output_dir, args.model_name, args.dataset_name, "checkpoints")
     if not os.path.exists(checkpoint_dir):
         os.makedirs(checkpoint_dir)
 
-    logdir = os.path.join(args.output_dir, "citris_vae", args.dataset_name, "log")
+    logdir = os.path.join(args.output_dir, args.model_name, args.dataset_name, "log")
     if not os.path.exists(logdir):
         os.makedirs(logdir)
     args.logdir = logdir
@@ -111,8 +108,14 @@ def main(args):
     model = CITRISVAE(args, datasets["train"].get_causal_var_info(), device)
 
     # Training
-    model.train(data_loaders['train'], data_loaders['val_triplet'], datasets['val'], args.num_epochs, datasets['train'])
+    model.train(data_loaders['train'], data_loaders['val_triplet'], datasets['val'], args.num_epochs, datasets['train'], checkpoint_dir)
 
+    # Load the best model
+    checkpoint = torch.load(os.path.join(checkpoint_dir, f"best.pt"))
+    model.encoder.load_state_dict(checkpoint['encoder'])
+    model.decoder.load_state_dict(checkpoint['decoder'])
+    model.intervention_classifier.load_state_dict(checkpoint['intervention_classifier'])
+    model.causal_assignment_net.load_state_dict(checkpoint['causal_assignment_net'])
 
     # Evaluate with triplet on test data
     test_avg_loss, test_avg_norm_dist = model.evaluate_with_triplet(data_loaders['test_triplet'], split="test")
@@ -128,9 +131,10 @@ def get_args_parser():
 
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset_name', type=str, default="pong")
-    parser.add_argument('--seed', type=int, default=42)
-    parser.add_argument('--num_epochs', type=int, default=20)
-    parser.add_argument('--probe_num_epochs', type=int, default=10)
+    parser.add_argument('--model_name', type=str, default="citris_vae")
+    parser.add_argument('--seed', type=int, default=2022)
+    parser.add_argument('--num_epochs', type=int, default=300)
+    parser.add_argument('--probe_num_epochs', type=int, default=100)
     parser.add_argument('--probe_lr', type=float, default=1e-4)
     parser.add_argument('--batch_size', type=int, default=512)
     parser.add_argument('--num_workers', type=int, default=6)
@@ -140,9 +144,9 @@ def get_args_parser():
     parser.add_argument('--lr', type=float, default=1e-3)
     parser.add_argument('--warmup', type=int, default=100)
     parser.add_argument('--imperfect_interventions', action='store_true')
-    parser.add_argument('--check_triplet_every_n_epoch', type=int, default=1)
-    parser.add_argument('--check_correlation_every_n_epoch', type=int, default=1)
-    parser.add_argument('--c_hid', type=int, default=32)
+    parser.add_argument('--coarse_vars', action='store_true')
+    parser.add_argument('--check_correlation_every_n_epoch', type=int, default=10)
+    parser.add_argument('--c_hid', type=int, default=64)
     parser.add_argument('--decoder_num_blocks', type=int, default=1)
     parser.add_argument('--num_latents', type=int, default=16)
     parser.add_argument('--classifier_lr', type=float, default=4e-3)
@@ -156,7 +160,7 @@ def get_args_parser():
     parser.add_argument('--project_name', type=str, default='pgm_citris_vae')
     parser.add_argument('--data_dir', type=str, default='/home/mila/a/arefinmr/scratch/PGM/data/interventional_pong')
     parser.add_argument('--output_dir', type=str, default='/home/mila/a/arefinmr/scratch/PGM/output')
-    parser.add_argument('--pretrained_causal_model_path', type=str, default='/home/mila/a/arefinmr/scratch/PGM/output/causal_model/pong/checkpoints/causal_model_last.pt')
+    parser.add_argument('--pretrained_causal_model_path', type=str, default='/home/mila/a/arefinmr/scratch/PGM/output/causal_checkpoints/pong_causal_checkpoint.ckpt')
     
 
     return parser

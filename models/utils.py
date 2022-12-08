@@ -171,7 +171,7 @@ def log_matrix(matrix, epoch, name, log_dir):
     new_epoch = np.array([new_epoch])
     new_val = matrix[None]
     if os.path.isfile(filename):
-        prev_data = np.load(filename)
+        prev_data = np.load(filename, allow_pickle=True)
         epochs, values = prev_data['epochs'], prev_data['values']
         epochs = np.concatenate([epochs, new_epoch], axis=0)
         values = np.concatenate([values, new_val], axis=0)
@@ -215,17 +215,17 @@ def _log_heatmap(target_names, values, epoch, tag, split, title=None, xticks=Non
     if values.shape[0] == values.shape[1] + 1:  # Remove 'lambda_sparse' variables
         values = values[:-1]
 
-    if values.shape[0] == values.shape[1]:
-        avg_diag = np.diag(values).mean()
-        max_off_diag = (values - np.eye(values.shape[0]) * 10).max(axis=-1).mean()
-        if epoch is not None:
-            wandb.log({f'corr_{tag}_diag{split}': avg_diag}, step=epoch)
-            wandb.log({f'corr_{tag}_max_off_diag{split}': max_off_diag}, step=epoch)
-            print(f"Epoch {epoch} | corr_{tag}_diag{split}: {avg_diag:0.4f} | corr_{tag}_max_off_diag{split}: {max_off_diag:0.4f} ")
-        else:
-            wandb.log({f'corr_{tag}_diag{split}': avg_diag})
-            wandb.log({f'corr_{tag}_max_off_diag{split}': max_off_diag})
-            print(f"corr_{tag}_diag{split}: {avg_diag:0.4f} | corr_{tag}_max_off_diag{split}: {max_off_diag:0.4f} ")
+    # if values.shape[0] == values.shape[1]:
+    avg_diag = np.diag(values).mean()
+    max_off_diag = (values - np.eye(values.shape[0]) * 10).max(axis=-1).mean()
+    if epoch is not None:
+        wandb.log({f'corr_{tag}_diag{split}': avg_diag}, step=epoch)
+        wandb.log({f'corr_{tag}_max_off_diag{split}': max_off_diag}, step=epoch)
+        print(f"Epoch {epoch} | corr_{tag}_diag{split}: {avg_diag:0.4f} | corr_{tag}_max_off_diag{split}: {max_off_diag:0.4f} ")
+    else:
+        wandb.log({f'corr_{tag}_diag{split}': avg_diag})
+        wandb.log({f'corr_{tag}_max_off_diag{split}': max_off_diag})
+        print(f"corr_{tag}_diag{split}: {avg_diag:0.4f} | corr_{tag}_max_off_diag{split}: {max_off_diag:0.4f} ")
 
 def log_R2_statistic(target_names, encoder, epoch, split, logdir, test_labels, norm_dists):
     avg_pred_dict = OrderedDict()
