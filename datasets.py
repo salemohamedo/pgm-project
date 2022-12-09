@@ -597,8 +597,8 @@ class VoronoiDataset(data.Dataset):
                 VoronoiDataset.VAR_INFO.pop(key)
         for i, key in enumerate(self.keys):
             latent = self.latents[...,i]
-            if self.settings['graph_idx'] < 0:
-                print('Latent std', latent.std().item(), 'Max', latent.max().item(), 'Min', latent.min().item())
+            # if self.settings['graph_idx'] < 0:
+            #     print('Latent std', latent.std().item(), 'Max', latent.max().item(), 'Min', latent.min().item())
                 # latent = torch.tanh(latent / 1.5) * 2.5
             target = self.targets[...,i]
             if causal_vars is not None:
