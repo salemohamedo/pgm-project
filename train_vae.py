@@ -18,18 +18,28 @@ def load_datasets(args):
 
     if 'pong' == args.dataset_name:
         DataClass = InterventionalPongDataset
+        dataset_args = {}
+        test_args = lambda train_set: {'causal_vars': train_set.target_names_l}
     elif 'causal3d' == args.dataset_name:
         DataClass = Causal3DDataset
+        dataset_args = {'coarse_vars': args.coarse_vars, 'exclude_vars': args.exclude_vars, 'exclude_objects': args.exclude_objects}
+        test_args = lambda train_set: {'causal_vars': train_set.full_target_names}
     elif 'voronoi' == args.dataset_name:
         DataClass = VoronoiDataset
+        dataset_args = {}
+        test_args = lambda train_set: {'causal_vars': train_set.target_names_l}
+
+    # if 'pong' == args.dataset_name:
+    #     DataClass = InterventionalPongDataset
+    # elif 'causal3d' == args.dataset_name:
+    #     DataClass = Causal3DDataset
+    # elif 'voronoi' == args.dataset_name:
+    #     DataClass = VoronoiDataset
     # elif 'pinball' == args.dataset_name:
     #     DataClass = PinballDataset
     # elif 'ball_in_boxes' == args.dataset_name:
     #     DataClass = BallInBoxesDataset
 
-    dataset_args = {}
-
-    test_args = lambda train_set: {'causal_vars': train_set.target_names_l}
     train_dataset = DataClass(
         data_folder=args.data_dir, split='train', single_image=False, triplet=False, seq_len=args.seq_len, **dataset_args)
     val_dataset = DataClass(
@@ -71,6 +81,7 @@ def load_datasets(args):
         print(f'Test correlation dataset sizes: { {key: len(test_dataset[key]) for key in test_dataset} }')
     else:
         print(f'Test correlation dataset size: {len(test_dataset)}')
+        
 
     datasets = {
         'train': train_dataset,
@@ -94,7 +105,7 @@ def main(args):
     if not os.path.exists(checkpoint_dir):
         os.makedirs(checkpoint_dir)
 
-    logdir = os.path.join(args.output_dir, args.model_name, args.dataset_name, "log")
+    logdir = os.path.join(args.output_dir, args.model_name, args.dataset_name, "log2")
     if not os.path.exists(logdir):
         os.makedirs(logdir)
     args.logdir = logdir
@@ -103,9 +114,10 @@ def main(args):
     args.c_in = datasets["train"].get_inp_channels()
     args.img_width = datasets["train"].get_img_width()
     args.max_iters = args.num_epochs * len(data_loaders['train'])
+    # args.warmup = args.warmup * len(data_loaders['train'])
     args.num_causal_vars = datasets["train"].num_vars()
 
-    model = CITRISVAE(args, datasets["train"].get_causal_var_info(), device)
+    model = CITRISVAE(args, datasets["train"].target_names(), device)
 
     # Training
     model.train(data_loaders['train'], data_loaders['val_triplet'], datasets['val'], args.num_epochs, datasets['train'], checkpoint_dir)
@@ -115,7 +127,8 @@ def main(args):
     model.encoder.load_state_dict(checkpoint['encoder'])
     model.decoder.load_state_dict(checkpoint['decoder'])
     model.intervention_classifier.load_state_dict(checkpoint['intervention_classifier'])
-    model.causal_assignment_net.load_state_dict(checkpoint['causal_assignment_net'])
+    model.transition_prior.load_state_dict(checkpoint['transition_prior'])
+    # model.causal_assignment_net.load_state_dict(checkpoint['causal_assignment_net'])
 
     # Evaluate with triplet on test data
     test_avg_loss, test_avg_norm_dist = model.evaluate_with_triplet(data_loaders['test_triplet'], split="test")
@@ -133,18 +146,21 @@ def get_args_parser():
     parser.add_argument('--dataset_name', type=str, default="pong")
     parser.add_argument('--model_name', type=str, default="citris_vae")
     parser.add_argument('--seed', type=int, default=2022)
-    parser.add_argument('--num_epochs', type=int, default=300)
-    parser.add_argument('--probe_num_epochs', type=int, default=100)
-    parser.add_argument('--probe_lr', type=float, default=1e-4)
+    parser.add_argument('--num_epochs', type=int, default=200)
+    parser.add_argument('--probe_num_epochs', type=int, default=200)
+    parser.add_argument('--probe_lr', type=float, default=4e-3)
     parser.add_argument('--batch_size', type=int, default=512)
     parser.add_argument('--num_workers', type=int, default=6)
-    parser.add_argument('--exclude_objects', type=int, nargs='+', default=None)
     parser.add_argument('--img_width', type=int, default=32)
     parser.add_argument('--seq_len', type=int, default=2)
     parser.add_argument('--lr', type=float, default=1e-3)
     parser.add_argument('--warmup', type=int, default=100)
     parser.add_argument('--imperfect_interventions', action='store_true')
+    parser.add_argument('--autoregressive_prior', action='store_true')
+    parser.add_argument('--use_flow_prior', action='store_true')
     parser.add_argument('--coarse_vars', action='store_true')
+    parser.add_argument('--exclude_vars', type=str, nargs='+', default=None)
+    parser.add_argument('--exclude_objects', type=int, nargs='+', default=None)
     parser.add_argument('--check_correlation_every_n_epoch', type=int, default=10)
     parser.add_argument('--c_hid', type=int, default=64)
     parser.add_argument('--decoder_num_blocks', type=int, default=1)

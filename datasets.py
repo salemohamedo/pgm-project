@@ -197,8 +197,8 @@ class Causal3DDataset(data.Dataset):
         filename = split
         if triplet:
             filename += '_triplets'
-            if coarse_vars:
-                filename += '_coarse'
+            # if coarse_vars:
+            #     filename += '_coarse'
         self.split_name = filename
         data_file = os.path.join(data_folder, f'{filename}.npz')
         if split.startswith('val') and not os.path.isfile(data_file):
@@ -290,6 +290,7 @@ class Causal3DDataset(data.Dataset):
                 self.targets = torch.cat([self.targets[...,abs_vars].any(dim=-1, keepdims=True), self.targets[...,~abs_vars]], dim=-1)
                 self.target_names_l = [abs_class] + [n for i, n in enumerate(self.target_names_l) if not abs_vars[i]]
         print(f'Considering the following causal variables: {self.target_names_l}')
+        
 
     @torch.no_grad()
     def encode_dataset(self, encoder, batch_size=256):

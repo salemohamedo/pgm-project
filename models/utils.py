@@ -10,6 +10,62 @@ from collections import OrderedDict, defaultdict
 import wandb
 import torch.nn.functional as F
 
+
+def gaussian_log_prob(mean, log_std, samples):
+    """ Returns the log probability of a specified Gaussian for a tensor of samples """
+    if len(samples.shape) == len(mean.shape)+1:
+        mean = mean[...,None]
+    if len(samples.shape) == len(log_std.shape)+1:
+        log_std = log_std[...,None]
+    return - log_std - 0.5 * np.log(2*np.pi) - 0.5 * ((samples - mean) / log_std.exp())**2
+
+
+class AutoregLinear(nn.Module):
+
+    def __init__(self, num_vars, inp_per_var, out_per_var, diagonal=False, 
+                       no_act_fn_init=False, 
+                       init_std_factor=1.0, 
+                       init_bias_factor=1.0,
+                       init_first_block_zeros=False):
+        """
+        Autoregressive linear layer, where the weight matrix is correspondingly masked.
+        Parameters
+        ----------
+        num_vars : int
+                   Number of autoregressive variables/steps.
+        inp_per_var : int
+                      Number of inputs per autoregressive variable.
+        out_per_var : int
+                      Number of outputs per autoregressvie variable.
+        diagonal : bool
+                   If True, the n-th output depends on the n-th input.
+                   If False, the n-th output only depends on the inputs 1 to n-1
+        """
+        super().__init__()
+        self.linear = nn.Linear(num_vars * inp_per_var, 
+                                num_vars * out_per_var)
+        mask = torch.zeros_like(self.linear.weight.data)
+        init_kwargs = {}
+        if no_act_fn_init:  # Set kaiming to init for linear act fn
+            init_kwargs['nonlinearity'] = 'leaky_relu'
+            init_kwargs['a'] = 1.0
+        for out_var in range(num_vars):
+            out_start_idx = out_var * out_per_var
+            out_end_idx = (out_var+1) * out_per_var
+            inp_end_idx = (out_var+(1 if diagonal else 0)) * inp_per_var
+            if inp_end_idx > 0:
+                mask[out_start_idx:out_end_idx, :inp_end_idx] = 1.0
+                if out_var == 0 and init_first_block_zeros:
+                    self.linear.weight.data[out_start_idx:out_end_idx, :inp_end_idx].fill_(0.0)
+                else:
+                    nn.init.kaiming_uniform_(self.linear.weight.data[out_start_idx:out_end_idx, :inp_end_idx], **init_kwargs)
+        self.linear.weight.data.mul_(init_std_factor)
+        self.linear.bias.data.mul_(init_bias_factor)
+        self.register_buffer('mask', mask)
+
+    def forward(self, x):
+        return F.linear(x, self.linear.weight * self.mask, self.linear.bias)
+
 @torch.no_grad()
 def visualize_reconstruction(model, image, label, dataset):
     """ Plots the reconstructions of a VAE """
@@ -215,17 +271,17 @@ def _log_heatmap(target_names, values, epoch, tag, split, title=None, xticks=Non
     if values.shape[0] == values.shape[1] + 1:  # Remove 'lambda_sparse' variables
         values = values[:-1]
 
-    # if values.shape[0] == values.shape[1]:
-    avg_diag = np.diag(values).mean()
-    max_off_diag = (values - np.eye(values.shape[0]) * 10).max(axis=-1).mean()
-    if epoch is not None:
-        wandb.log({f'corr_{tag}_diag{split}': avg_diag}, step=epoch)
-        wandb.log({f'corr_{tag}_max_off_diag{split}': max_off_diag}, step=epoch)
-        print(f"Epoch {epoch} | corr_{tag}_diag{split}: {avg_diag:0.4f} | corr_{tag}_max_off_diag{split}: {max_off_diag:0.4f} ")
-    else:
-        wandb.log({f'corr_{tag}_diag{split}': avg_diag})
-        wandb.log({f'corr_{tag}_max_off_diag{split}': max_off_diag})
-        print(f"corr_{tag}_diag{split}: {avg_diag:0.4f} | corr_{tag}_max_off_diag{split}: {max_off_diag:0.4f} ")
+    if values.shape[0] == values.shape[1]:
+        avg_diag = np.diag(values).mean()
+        max_off_diag = (values - np.eye(values.shape[0]) * 10).max(axis=-1).mean()
+        if epoch is not None:
+            wandb.log({f'corr_{tag}_diag{split}': avg_diag}, step=epoch)
+            wandb.log({f'corr_{tag}_max_off_diag{split}': max_off_diag}, step=epoch)
+            print(f"Epoch {epoch} | corr_{tag}_diag{split}: {avg_diag:0.4f} | corr_{tag}_max_off_diag{split}: {max_off_diag:0.4f} ")
+        else:
+            wandb.log({f'corr_{tag}_diag{split}': avg_diag})
+            wandb.log({f'corr_{tag}_max_off_diag{split}': max_off_diag})
+            print(f"corr_{tag}_diag{split}: {avg_diag:0.4f} | corr_{tag}_max_off_diag{split}: {max_off_diag:0.4f} ")
 
 def log_R2_statistic(target_names, encoder, epoch, split, logdir, test_labels, norm_dists):
     avg_pred_dict = OrderedDict()

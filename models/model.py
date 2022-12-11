@@ -6,8 +6,10 @@ import torch.utils.data as data
 import numpy as np
 from models.utils import SineWarmupScheduler, CosineWarmupScheduler
 from models.CITRIS_encoder_decoder import Encoder, Decoder, SimpleEncoder, SimpleDecoder
+from models.CITRIS_transition_prior import TransitionPrior
 from models.autoregressive_prior import CausalAssignmentNet, AutoregressivePrior
 from models.intervention_classifier import InterventionClassifier
+from models.CITRIS_target_classifier import TargetClassifier
 import wandb
 import os
 from models.utils import log_R2_statistic, log_Spearman_statistics
@@ -16,24 +18,27 @@ from collections import OrderedDict
 from models.utils import CosineWarmupScheduler, ImageLog
 from models.causal_model import CausalNet
 from tqdm.auto import tqdm
-
+from models.CITRIS_flow_layers import AutoregNormalizingFlow
+from models.utils import gaussian_log_prob
 
 class CITRISVAE(torch.nn.Module):
     def __init__(self, args, causal_var_info, device):
         super(CITRISVAE, self).__init__()
         self.device = device
-        self.causal_var_info = causal_var_info
         self.args = args
 
         # Load pretrained causal model for triplet evaluation
         if os.path.exists(args.pretrained_causal_model_path):
-            self.pretrained_causal_model = CausalModel(causal_var_info=causal_var_info, 
+            self.causal_var_info = torch.load(args.pretrained_causal_model_path)["hyper_parameters"]["causal_var_info"]
+            self.pretrained_causal_model = CausalModel(causal_var_info=self.causal_var_info, 
                         img_width=args.img_width, 
                         c_in=args.c_in, 
                         c_hid=args.c_hid, 
                         is_mlp=False, 
                         device=device)
             self.pretrained_causal_model.causal_net.load_state_dict(torch.load(args.pretrained_causal_model_path)["state_dict"])
+            for p in self.pretrained_causal_model.causal_net.parameters():
+                p.requires_grad_(False)
 
         # VAE Encoder, Decoder
         if self.args.img_width == 32:
@@ -58,37 +63,71 @@ class CITRISVAE(torch.nn.Module):
                                           act_fn=lambda: nn.SiLU())
 
         # CausalAssignmentNet
-        self.causal_assignment_net = CausalAssignmentNet(
-            n_latents=self.args.num_latents,
-            n_causal_vars=self.args.num_causal_vars + 1,
-            lambda_reg=self.args.lambda_reg)
+        # self.causal_assignment_net = CausalAssignmentNet(
+        #     n_latents=self.args.num_latents,
+        #     n_causal_vars=self.args.num_causal_vars + 1,
+        #     lambda_reg=self.args.lambda_reg)
 
         # Transition prior
-        self.transition_prior = AutoregressivePrior(
-            causal_assignment_net=self.causal_assignment_net, 
-            n_latents=self.args.num_latents,
-            n_causal_vars=self.args.num_causal_vars + 1, 
-            n_hid_per_latent=16,
-            imperfect_interventions=self.args.imperfect_interventions,
-            lambda_reg=self.args.lambda_reg)
+        # self.transition_prior = AutoregressivePrior(
+        #     causal_assignment_net=self.causal_assignment_net, 
+        #     n_latents=self.args.num_latents,
+        #     n_causal_vars=self.args.num_causal_vars + 1, 
+        #     n_hid_per_latent=16,
+        #     imperfect_interventions=self.args.imperfect_interventions,
+        #     lambda_reg=self.args.lambda_reg)
+
+        # Transition prior
+        self.transition_prior = TransitionPrior(num_latents=self.args.num_latents,
+                                        num_blocks=self.args.num_causal_vars,
+                                        c_hid=self.args.c_hid,
+                                        imperfect_interventions=self.args.imperfect_interventions,
+                                        lambda_reg=self.args.lambda_reg,
+                                        autoregressive_model=self.args.autoregressive_prior,
+                                        gumbel_temperature=1.0)
 
         # Intervention Classifier
-        self.intervention_classifier = InterventionClassifier(
-            causal_assignment_net=self.causal_assignment_net,
-            n_latents=self.args.num_latents,
-            n_causal_vars=self.args.num_causal_vars,
-            hidden_dim=self.args.c_hid,
-            momentum=self.args.classifier_momentum,
-            use_norm=self.args.classifier_use_normalization)
+        # self.intervention_classifier = InterventionClassifier(
+        #     causal_assignment_net=self.causal_assignment_net,
+        #     n_latents=self.args.num_latents,
+        #     n_causal_vars=self.args.num_causal_vars,
+        #     hidden_dim=self.args.c_hid,
+        #     momentum=self.args.classifier_momentum,
+        #     use_norm=self.args.classifier_use_normalization)
+
+        # Target classifier
+        self.intervention_classifier = TargetClassifier(num_latents=self.args.num_latents,
+                                                num_blocks=self.args.num_causal_vars,
+                                                c_hid=self.args.c_hid,
+                                                momentum_model=self.args.classifier_momentum,
+                                                use_normalization=self.args.classifier_use_normalization)
+
+
+        if self.args.use_flow_prior:
+            self.flow = AutoregNormalizingFlow(self.args.num_latents,
+                                               num_flows=4,
+                                               act_fn=nn.SiLU,
+                                               hidden_per_var=16)
 
         # remove causal_assignment_net params since they are included in classifier params
         transition_prior_params = [p for n, p in self.transition_prior.named_parameters() if "causal_assignment_net" not in n and p.requires_grad]
 
         # Optimizer for training the model
-        self.optimizer = optim.AdamW([{'params': self.intervention_classifier.parameters(), 'lr': self.args.classifier_lr, 'weight_decay': 1e-4},
+        if self.args.use_flow_prior:
+            self.optimizer = optim.AdamW([{'params': self.intervention_classifier.parameters(), 'lr': self.args.classifier_lr, 'weight_decay': 1e-4},
                                       {'params': self.encoder.parameters()},
                                       {'params': self.decoder.parameters()},
-                                      {'params': transition_prior_params}
+                                      {'params': self.transition_prior.parameters()},
+                                      {'params': self.flow.parameters()},
+                                      # {'params': transition_prior_params}
+                                      ], lr=self.args.lr, weight_decay=0.0)
+        else:
+            self.optimizer = optim.AdamW([{'params': self.intervention_classifier.parameters(), 'lr': self.args.classifier_lr, 'weight_decay': 1e-4},
+                                      {'params': self.encoder.parameters()},
+                                      {'params': self.decoder.parameters()},
+                                      {'params': self.transition_prior.parameters()},
+                                      # {'params': self.flow.parameters()},
+                                      # {'params': transition_prior_params}
                                       ], lr=self.args.lr, weight_decay=0.0)
 
         # self.optimizer = optim.AdamW([{'params': self.intervention_classifier.parameters()},
@@ -96,6 +135,8 @@ class CITRISVAE(torch.nn.Module):
         #                               {'params': self.decoder.parameters()},
         #                               {'params': transition_prior_params} 
         #                               ], lr=self.args.lr, weight_decay=0.0)
+
+        # self.optimizer = optim.Adam(self.parameters(), lr=self.args.lr, weight_decay=0.0)
 
 
         # Learning rate schedular for  model optimizer
@@ -111,14 +152,41 @@ class CITRISVAE(torch.nn.Module):
         z_logstd = z_logstd.view(b, seq_len, -1)
         x_rec = x_rec.view(b, seq_len-1, c, h, w)
 
-        # KL divergence between every pair of frames
-        kld_t1_all = self.transition_prior.compute_kl_loss(z_t=z_mean[:, :-1].view(b*(seq_len-1), -1), 
-                                                     intrv=target.view(b*(seq_len-1), -1), 
-                                                     z_t1_mean=z_mean[:, 1:].view(b*(seq_len-1), -1), 
-                                                     z_t1_logstd=z_logstd[:, 1:].view(b*(seq_len-1), -1), 
-                                                     z_t1_samples=z_sample[:, 1:].view(b*(seq_len-1), -1))
+        if self.args.use_flow_prior:
+            init_nll = -gaussian_log_prob(z_mean[:, 1:], z_logstd[:, 1:], z_sample[:, 1:]).sum(dim=-1)
+            z_sample, ldj = self.flow(z_sample.flatten(0, 1)) #view(b*seq_len, -1)) #flatten(0, 1)) view(b*seq_len, -1)
+            z_sample = z_sample.unflatten(0, (imgs.shape[0], -1)) #z_sample.view(b, seq_len, -1) #
+            ldj = ldj.unflatten(0, (imgs.shape[0], -1))[:,1:]  #ldj.view(b, seq_len, -1)[:,1:]
+            out_nll = self.transition_prior.sample_based_nll(z_t1=z_sample[:, None, 1:].flatten(0, 1), 
+                                                     target=target.flatten(0, 1), 
+                                                      z_t=z_sample[:, None, :-1].flatten(0, 1))
+            out_nll = out_nll.unflatten(0, (imgs.shape[0], -1))
+            p_z = out_nll 
+            p_z_x = init_nll - ldj
+            kld = -(p_z_x - p_z)
+            kld_t1_all = kld.unflatten(0, (imgs.shape[0], -1)).sum(dim=1)
+        else:
+            # Calculate KL divergence between every pair of frames
+            # kld_t1_all = self.transition_prior.kl_divergence(z_t=z_mean[:,:-1].flatten(0, 1), 
+            #                                          target=target.flatten(0, 1), 
+            #                                          z_t1_mean=z_mean[:,1:].flatten(0, 1), 
+            #                                          z_t1_logstd=z_logstd[:,1:].flatten(0, 1), 
+            #                                          z_t1_sample=z_sample[:,1:].flatten(0, 1))
 
-        kld_t1_all = kld_t1_all.view(b, seq_len-1).sum(dim=1)
+            kld_t1_all = self.transition_prior.kl_divergence(z_t=z_mean[:, :-1].view(b*(seq_len-1), -1), 
+                                                        target=target.view(b*(seq_len-1), -1), 
+                                                        z_t1_mean=z_mean[:, 1:].view(b*(seq_len-1), -1), 
+                                                        z_t1_logstd=z_logstd[:, 1:].view(b*(seq_len-1), -1), 
+                                                        z_t1_sample=z_sample[:, 1:].view(b*(seq_len-1), -1))
+            # kld_t1_all = kld_t1_all.unflatten(0, (imgs.shape[0], -1)).sum(dim=1)
+            # KL divergence between every pair of frames
+            # kld_t1_all = self.transition_prior.compute_kl_loss(z_t=z_mean[:, :-1].view(b*(seq_len-1), -1), 
+            #                                             intrv=target.view(b*(seq_len-1), -1), 
+            #                                             z_t1_mean=z_mean[:, 1:].view(b*(seq_len-1), -1), 
+            #                                             z_t1_logstd=z_logstd[:, 1:].view(b*(seq_len-1), -1), 
+            #                                             z_t1_samples=z_sample[:, 1:].view(b*(seq_len-1), -1))
+
+            kld_t1_all = kld_t1_all.view(b, seq_len-1).sum(dim=1)
         # reconstruction loss
         rec_loss = F.mse_loss(x_rec, imgs[:, 1:], reduction='none').sum(dim=[-3, -2, -1])
 
@@ -127,10 +195,13 @@ class CITRISVAE(torch.nn.Module):
         loss = loss / (seq_len - 1)
 
         # target classifier loss
-        loss_model, loss_z = self.intervention_classifier(z_samples=z_sample, intrv_targets=target)
+        # loss_model, loss_z = self.intervention_classifier(z_samples=z_sample, intrv_targets=target)
+        loss_model, loss_z = self.intervention_classifier(z_sample=z_sample, target=target, transition_prior=self.transition_prior)
+
         loss = loss + (loss_model + loss_z) * self.args.beta_classifier
 
         return loss, rec_loss.mean(), loss_model, loss_z, kld_t1_all.mean() / (seq_len-1)
+
 
     def train(self, train_data_loader, val_data_loader, correlation_dataset, num_epochs, dataset_train, checkpoint_dir):
 
@@ -140,6 +211,8 @@ class CITRISVAE(torch.nn.Module):
         self.decoder.to(self.device)
         self.intervention_classifier.to(self.device)
         self.transition_prior.to(self.device)
+        if self.args.use_flow_prior:
+            self.flow.to(self.device)
         best_dist = 9e10
         for epoch in range(num_epochs):
             self.encoder.train()
@@ -167,6 +240,8 @@ class CITRISVAE(torch.nn.Module):
 
                 self.optimizer.zero_grad()
                 loss.backward() 
+                torch.nn.utils.clip_grad_norm_(self.parameters(), 1.0)
+                # torch.nn.utils.clip_grad_value_(self.parameters(), 1.0)
                 self.optimizer.step()
                 self.lr_scheduler.step()
                 iteration += 1  
@@ -195,8 +270,9 @@ class CITRISVAE(torch.nn.Module):
                 torch.save({
                     'encoder': self.encoder.state_dict(),
                     'decoder': self.decoder.state_dict(),
-                    'causal_assignment_net': self.causal_assignment_net.state_dict(),
+                    # 'causal_assignment_net': self.causal_assignment_net.state_dict(),
                     'intervention_classifier': self.intervention_classifier.state_dict(),
+                    'transition_prior': self.transition_prior.state_dict(),
                     }, PATH)
 
 
@@ -245,19 +321,16 @@ class CITRISVAE(torch.nn.Module):
         test_size = all_encs.shape[0] - train_size
         train_dataset, test_dataset = data.random_split(full_dataset, lengths=[train_size, test_size], 
                                                         generator=torch.Generator().manual_seed(42))
-
         
-        if hasattr(self, 'transition_prior'):
-            target_assignment = self.transition_prior.get_target_assignment(hard=True)
-        else:
-            target_assignment = torch.eye(all_encs.shape[-1])
+        target_assignment = self.transition_prior.get_target_assignment(hard=True)
         
         return train_dataset, test_dataset, target_assignment
 
     def evaluate_correlation(self, dataset, split, logdir, epoch=None):
         train_dataset, test_dataset, target_assignment = self.enocode_dataset(dataset, train_percentage=0.5)
 
-        causal_model = CausalModel(self.causal_var_info, self.args.img_width, self.args.num_latents*2, self.args.c_hid, is_mlp=True, device=self.device)
+        # self.args.c_hid = 128
+        causal_model = CausalModel(self.causal_var_info, self.args.img_width, self.args.num_latents*2, 128, is_mlp=True, device=self.device)
 
         train_loader = data.DataLoader(train_dataset, shuffle=True, drop_last=False, batch_size=self.args.batch_size)
 
@@ -269,6 +342,7 @@ class CITRISVAE(torch.nn.Module):
 
         test_loader = torch.utils.data.DataLoader(test_dataset, shuffle=False, batch_size=len(test_dataset))
         test_inps, test_labels = next(iter(test_loader))
+
         test_exp_inps, test_exp_labels = self._prepare_input(test_inps, target_assignment.cpu(), test_labels, flatten_inp=False)
         pred_dict = trained_causal_net(test_exp_inps.to(self.device))
         for key in pred_dict:
@@ -367,7 +441,7 @@ class CITRISVAE(torch.nn.Module):
 
 ################################ Causal Model ################################
 class CausalModel(nn.Module):
-    def __init__(self, causal_var_info, img_width, c_in, c_hid, is_mlp, device, angle_reg_weight=None, checkpoint_dir=None):
+    def __init__(self, causal_var_info, img_width, c_in, c_hid, is_mlp, device, angle_reg_weight=0.1, checkpoint_dir=None):
 
         super().__init__()
         self.device = device
@@ -406,7 +480,7 @@ class CausalModel(nn.Module):
                 vec = torch.stack([torch.sin(gt_val), torch.cos(gt_val)], dim=-1)
                 cos_sim = F.cosine_similarity(pred_dict[var_key], vec, dim=-1)
                 losses[var_key] = 1 - cos_sim
-                if is_training and self.angle_reg_weight is not None:
+                if is_training:
                     norm = pred_dict[var_key].norm(dim=-1, p=2.0)
                     losses[var_key + '_reg'] = self.angle_reg_weight * (2 - norm) ** 2
                 dists[var_key] = torch.where(cos_sim > (1-1e-7), torch.zeros_like(cos_sim), torch.acos(cos_sim.clamp_(min=-1+1e-7, max=1-1e-7)))
@@ -447,12 +521,12 @@ class CausalModel(nn.Module):
 
                 loss, norm_dist = 0., 0.
                 for key in losses:
-                    loss += losses[key]
+                    loss += losses[key] / len(losses)
                 for key in norm_dists:
-                    norm_dist += norm_dists[key].mean()
+                    norm_dist += norm_dists[key].mean() / len(norm_dists)
 
-                avg_loss += loss.item()
-                avg_norm_dist += norm_dist.item()
+                avg_loss += loss.item() 
+                avg_norm_dist += norm_dist.item() 
 
             avg_loss /= len(test_loader)
             avg_norm_dist /= len(test_loader)
@@ -481,14 +555,18 @@ class CausalModel(nn.Module):
                 v_dict = self.causal_net(inps)
                 losses, dists, norm_dists = self.calculate_loss_distance(v_dict, labels, is_training=True)
 
-                loss, norm_dist = 0., 0.
-                for key in losses:
-                    loss += losses[key] / len(losses)
+                loss = sum([losses[key] for key in losses])
+
+                norm_dist = 0.
+                # for key in losses:
+                #     loss += losses[key] / len(losses)
                 for key in norm_dists:
                     norm_dist += norm_dists[key].mean() / len(norm_dists)
 
                 self.optimizer.zero_grad()
                 loss.backward() 
+                # torch.nn.utils.clip_grad_norm_(self.causal_net.parameters(), 1.0)
+                torch.nn.utils.clip_grad_value_(self.causal_net.parameters(), 1.0)
                 self.optimizer.step()
 
                 if self.lr_scheduler is not None:

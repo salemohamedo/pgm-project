@@ -148,7 +148,7 @@ class TargetClassifier(nn.Module):
         time_steps = z_sample.shape[1] - 1
         num_classes = target.shape[-1]
         # Sample latent-to-causal variable assignments
-        target_assignment = F.gumbel_softmax(transition_prior.params[None].expand(batch_size, time_steps, -1, -1), 
+        target_assignment = F.gumbel_softmax(transition_prior.target_params[None].expand(batch_size, time_steps, -1, -1), 
                                              tau=self.gumbel_temperature, hard=True)
         if target_assignment.shape[-1] == num_classes:
             target_assignment = torch.cat([target_assignment, target_assignment.new_zeros(target_assignment.shape[:-1] + (1,))], dim=-1)
