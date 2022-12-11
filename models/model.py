@@ -5,7 +5,7 @@ import torch.nn.functional as F
 import torch.utils.data as data
 import numpy as np
 from models.utils import SineWarmupScheduler, CosineWarmupScheduler
-from models.CITRIS_encoder_decoder import Encoder, Decoder, SimpleEncoder, SimpleDecoder
+# from models.CITRIS_encoder_decoder import Encoder, Decoder, SimpleEncoder, SimpleDecoder
 from models.CITRIS_transition_prior import TransitionPrior
 from models.autoregressive_prior import CausalAssignmentNet, AutoregressivePrior
 from models.intervention_classifier import InterventionClassifier
@@ -20,6 +20,7 @@ from models.causal_model import CausalNet
 from tqdm.auto import tqdm
 from models.CITRIS_flow_layers import AutoregNormalizingFlow
 from models.utils import gaussian_log_prob
+from models.encoder_decoder import SimpleEncoder, SimpleDecoder, ComplexDecoder, ComplexEncoder
 
 class CITRISVAE(torch.nn.Module):
     def __init__(self, args, causal_var_info, device):
@@ -42,25 +43,33 @@ class CITRISVAE(torch.nn.Module):
 
         # VAE Encoder, Decoder
         if self.args.img_width == 32:
-            self.encoder = SimpleEncoder(num_input_channels=self.args.c_in,
-                                             base_channel_size=self.args.c_hid,
-                                             latent_dim=self.args.num_latents)
-            self.decoder = SimpleDecoder(num_input_channels=self.args.c_in,
-                                             base_channel_size=self.args.c_hid,
-                                             latent_dim=self.args.num_latents)
+            self.encoder = SimpleEncoder(in_channels=self.args.c_in, c_hid=self.args.c_hid, latent_dim=self.args.num_latents)
+            self.decoder = SimpleDecoder(in_channels=self.args.c_in, c_hid=self.args.c_hid, latent_dim=self.args.num_latents)
         else:
-            self.encoder = Encoder(num_latents=self.args.num_latents,
-                                          c_hid=self.args.c_hid,
-                                          c_in=self.args.c_in,
-                                          width=self.args.img_width,
-                                          act_fn=lambda: nn.SiLU(),
-                                          variational=True)
-            self.decoder = Decoder(num_latents=self.args.num_latents,
-                                          c_hid=self.args.c_hid,
-                                          c_out=self.args.c_in,
-                                          width=self.args.img_width,
-                                          num_blocks=self.args.decoder_num_blocks,
-                                          act_fn=lambda: nn.SiLU())
+            self.encoder = ComplexEncoder(in_channels=self.args.c_in, c_hid=self.args.c_hid, latent_dim=self.args.num_latents, stocastic=True)
+            self.decoder = ComplexDecoder(in_channels=self.args.c_in, c_hid=self.args.c_hid, latent_dim=self.args.num_latents)
+
+        print(self.decoder)
+        # if self.args.img_width == 32:
+        #     self.encoder = SimpleEncoder(num_input_channels=self.args.c_in,
+        #                                      base_channel_size=self.args.c_hid,
+        #                                      latent_dim=self.args.num_latents)
+        #     self.decoder = SimpleDecoder(num_input_channels=self.args.c_in,
+        #                                      base_channel_size=self.args.c_hid,
+        #                                      latent_dim=self.args.num_latents)
+        # else:
+        #     self.encoder = Encoder(num_latents=self.args.num_latents,
+        #                                   c_hid=self.args.c_hid,
+        #                                   c_in=self.args.c_in,
+        #                                   width=self.args.img_width,
+        #                                   act_fn=lambda: nn.SiLU(),
+        #                                   variational=True)
+        #     self.decoder = Decoder(num_latents=self.args.num_latents,
+        #                                   c_hid=self.args.c_hid,
+        #                                   c_out=self.args.c_in,
+        #                                   width=self.args.img_width,
+        #                                   num_blocks=self.args.decoder_num_blocks,
+        #                                   act_fn=lambda: nn.SiLU())
 
         # CausalAssignmentNet
         # self.causal_assignment_net = CausalAssignmentNet(
