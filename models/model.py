@@ -98,7 +98,7 @@ class CITRISVAE(torch.nn.Module):
                                                hidden_per_var=16)
 
         # remove causal_assignment_net params since they are included in classifier params
-        # transition_prior_params = [p for n, p in self.transition_prior.named_parameters() if "causal_assignment_net" not in n and p.requires_grad]
+        transition_prior_params = [p for n, p in self.transition_prior.named_parameters() if "causal_assignment_net" not in n and p.requires_grad]
 
         # Optimizer for training the model
         if self.args.use_flow_prior:
@@ -107,7 +107,7 @@ class CITRISVAE(torch.nn.Module):
                                       {'params': self.decoder.parameters()},
                                     #   {'params': self.transition_prior.parameters()},
                                       {'params': self.flow.parameters()},
-                                    #   {'params': transition_prior_params}
+                                      {'params': transition_prior_params}
                                       ], lr=self.args.lr, weight_decay=0.0)
         else:
             self.optimizer = optim.AdamW([{'params': self.intervention_classifier.parameters(), 'lr': self.args.classifier_lr, 'weight_decay': 1e-4},
