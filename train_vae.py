@@ -117,7 +117,7 @@ def main(args):
     # args.warmup = args.warmup * len(data_loaders['train'])
     args.num_causal_vars = datasets["train"].num_vars()
 
-    model = CITRISVAE(args, datasets["train"].target_names(), device)
+    model = CITRISVAE(args, device)
 
     # Training
     model.train(data_loaders['train'], data_loaders['val_triplet'], datasets['val'], args.num_epochs, datasets['train'], checkpoint_dir)
@@ -128,7 +128,8 @@ def main(args):
     model.decoder.load_state_dict(checkpoint['decoder'])
     model.intervention_classifier.load_state_dict(checkpoint['intervention_classifier'])
     model.transition_prior.load_state_dict(checkpoint['transition_prior'])
-    # model.causal_assignment_net.load_state_dict(checkpoint['causal_assignment_net'])
+    if args.use_flow_prior:
+        model.transition_prior.load_state_dict(checkpoint['flow'])
 
     # Evaluate with triplet on test data
     test_avg_loss, test_avg_norm_dist = model.evaluate_with_triplet(data_loaders['test_triplet'], split="test")

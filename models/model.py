@@ -24,7 +24,7 @@ from models.encoder_decoder import SimpleEncoder, SimpleDecoder, ComplexDecoder,
 
 
 class CITRISVAE(torch.nn.Module):
-    def __init__(self, args, causal_var_info, device):
+    def __init__(self, args, device):
         super(CITRISVAE, self).__init__()
         self.device = device
         self.args = args
@@ -98,24 +98,21 @@ class CITRISVAE(torch.nn.Module):
                                                hidden_per_var=16)
 
         # remove causal_assignment_net params since they are included in classifier params
-        transition_prior_params = [p for n, p in self.transition_prior.named_parameters() if "causal_assignment_net" not in n and p.requires_grad]
+        intervention_classifier_params = [p for n, p in self.intervention_classifier.named_parameters() if "causal_assignment_net" not in n and p.requires_grad]
 
         # Optimizer for training the model
         if self.args.use_flow_prior:
-            self.optimizer = optim.AdamW([{'params': self.intervention_classifier.parameters(), 'lr': self.args.classifier_lr, 'weight_decay': 1e-4},
+            self.optimizer = optim.AdamW([{'params': intervention_classifier_params, 'lr': self.args.classifier_lr, 'weight_decay': 1e-4},
                                       {'params': self.encoder.parameters()},
                                       {'params': self.decoder.parameters()},
-                                    #   {'params': self.transition_prior.parameters()},
+                                      {'params': self.transition_prior.parameters()},
                                       {'params': self.flow.parameters()},
-                                      {'params': transition_prior_params}
                                       ], lr=self.args.lr, weight_decay=0.0)
         else:
-            self.optimizer = optim.AdamW([{'params': self.intervention_classifier.parameters(), 'lr': self.args.classifier_lr, 'weight_decay': 1e-4},
+            self.optimizer = optim.AdamW([{'params': intervention_classifier_params, 'lr': self.args.classifier_lr, 'weight_decay': 1e-4},
                                       {'params': self.encoder.parameters()},
                                       {'params': self.decoder.parameters()},
-                                    #   {'params': self.transition_prior.parameters()},
-                                      # {'params': self.flow.parameters()},
-                                    #   {'params': transition_prior_params}
+                                      {'params': self.transition_prior.parameters()},
                                       ], lr=self.args.lr, weight_decay=0.0)
 
         # self.optimizer = optim.Adam(self.parameters(), lr=self.args.lr, weight_decay=0.0)
@@ -202,6 +199,8 @@ class CITRISVAE(torch.nn.Module):
             self.decoder.train()
             self.transition_prior.train()
             self.intervention_classifier.train()
+            if self.args.use_flow_prior:
+                self.flow.train()
             loss_avg, rec_loss_avg, loss_model_avg, loss_model_z_avg, kld_t1_avg = 0., 0., 0., 0., 0.
             for batch in train_data_loader:
                 imgs, target = batch
@@ -250,11 +249,18 @@ class CITRISVAE(torch.nn.Module):
                     PATH = os.path.join(checkpoint_dir, f"best.pt")
                 else:
                     PATH = os.path.join(checkpoint_dir, f"last.pt")
-                torch.save({
+                if self.args.use_flow_prior:
+                    torch.save({
+                        'encoder': self.encoder.state_dict(),
+                        'decoder': self.decoder.state_dict(),
+                        'flow': self.flow.state_dict(),
+                        'intervention_classifier': self.intervention_classifier.state_dict(),
+                        'transition_prior': self.transition_prior.state_dict(),
+                        }, PATH)
+                else:
+                    torch.save({
                     'encoder': self.encoder.state_dict(),
                     'decoder': self.decoder.state_dict(),
-                    # 'causal_assignment_net': self.causal_assignment_net.state_dict(),
-                    'flow': self.flow.state_dict(),
                     'intervention_classifier': self.intervention_classifier.state_dict(),
                     'transition_prior': self.transition_prior.state_dict(),
                     }, PATH)
@@ -281,6 +287,9 @@ class CITRISVAE(torch.nn.Module):
         all_encs, all_latents = [], []
         loader = data.DataLoader(dataset, batch_size=256, drop_last=False, shuffle=False)
         self.encoder.eval()
+        
+        if self.args.use_flow_prior:
+            self.flow.eval()
         with torch.no_grad():
             for batch in loader:
                 inps, *_, latents = batch
