@@ -6,10 +6,10 @@ import torch.utils.data as data
 import numpy as np
 from models.utils import SineWarmupScheduler, CosineWarmupScheduler
 # from models.CITRIS_encoder_decoder import Encoder, Decoder, SimpleEncoder, SimpleDecoder
-from models.CITRIS_transition_prior import TransitionPrior
+# from models.CITRIS_transition_prior import TransitionPrior
 from models.autoregressive_prior import CausalAssignmentNet, AutoregressivePrior
 from models.intervention_classifier import InterventionClassifier
-from models.CITRIS_target_classifier import TargetClassifier
+# from models.CITRIS_target_classifier import TargetClassifier
 import wandb
 import os
 from models.utils import log_R2_statistic, log_Spearman_statistics
@@ -35,7 +35,7 @@ class CITRISVAE(torch.nn.Module):
             self.pretrained_causal_model = CausalModel(causal_var_info=self.causal_var_info, 
                         img_width=args.img_width, 
                         c_in=args.c_in, 
-                        c_hid=args.c_hid, 
+                        c_hid=64, 
                         is_mlp=False, 
                         device=device)
             self.pretrained_causal_model.causal_net.load_state_dict(torch.load(args.pretrained_causal_model_path)["state_dict"])
@@ -50,50 +50,29 @@ class CITRISVAE(torch.nn.Module):
             self.encoder = ComplexEncoder(in_channels=self.args.c_in, c_hid=self.args.c_hid, latent_dim=self.args.num_latents, stocastic=True)
             self.decoder = ComplexDecoder(in_channels=self.args.c_in, c_hid=self.args.c_hid, latent_dim=self.args.num_latents)
 
-        # if self.args.img_width == 32:
-        #     self.encoder = SimpleEncoder(num_input_channels=self.args.c_in,
-        #                                      base_channel_size=self.args.c_hid,
-        #                                      latent_dim=self.args.num_latents)
-        #     self.decoder = SimpleDecoder(num_input_channels=self.args.c_in,
-        #                                      base_channel_size=self.args.c_hid,
-        #                                      latent_dim=self.args.num_latents)
-        # else:
-        #     self.encoder = Encoder(num_latents=self.args.num_latents,
-        #                                   c_hid=self.args.c_hid,
-        #                                   c_in=self.args.c_in,
-        #                                   width=self.args.img_width,
-        #                                   act_fn=lambda: nn.SiLU(),
-        #                                   variational=True)
-        #     self.decoder = Decoder(num_latents=self.args.num_latents,
-        #                                   c_hid=self.args.c_hid,
-        #                                   c_out=self.args.c_in,
-        #                                   width=self.args.img_width,
-        #                                   num_blocks=self.args.decoder_num_blocks,
-        #                                   act_fn=lambda: nn.SiLU())
-
         # CausalAssignmentNet
         self.causal_assignment_net = CausalAssignmentNet(
             n_latents=self.args.num_latents,
             n_causal_vars=self.args.num_causal_vars + 1,
             lambda_reg=self.args.lambda_reg)
 
-        # # Transition prior
-        # self.transition_prior = AutoregressivePrior(
-        #     causal_assignment_net=self.causal_assignment_net, 
-        #     n_latents=self.args.num_latents,
-        #     n_causal_vars=self.args.num_causal_vars + 1, 
-        #     n_hid_per_latent=16,
-        #     imperfect_interventions=self.args.imperfect_interventions,
-        #     lambda_reg=self.args.lambda_reg)
-
         # Transition prior
-        self.transition_prior = TransitionPrior(num_latents=self.args.num_latents,
-                                        num_blocks=self.args.num_causal_vars,
-                                        c_hid=self.args.c_hid,
-                                        imperfect_interventions=self.args.imperfect_interventions,
-                                        lambda_reg=self.args.lambda_reg,
-                                        autoregressive_model=self.args.autoregressive_prior,
-                                        gumbel_temperature=1.0)
+        self.transition_prior = AutoregressivePrior(
+            causal_assignment_net=self.causal_assignment_net, 
+            n_latents=self.args.num_latents,
+            n_causal_vars=self.args.num_causal_vars + 1, 
+            n_hid_per_latent=16,
+            imperfect_interventions=self.args.imperfect_interventions,
+            lambda_reg=self.args.lambda_reg)
+
+        # # Transition prior
+        # self.transition_prior = TransitionPrior(num_latents=self.args.num_latents,
+        #                                 num_blocks=self.args.num_causal_vars,
+        #                                 c_hid=self.args.c_hid,
+        #                                 imperfect_interventions=self.args.imperfect_interventions,
+        #                                 lambda_reg=self.args.lambda_reg,
+        #                                 autoregressive_model=self.args.autoregressive_prior,
+        #                                 gumbel_temperature=1.0)
 
         # Intervention Classifier
         self.intervention_classifier = InterventionClassifier(
@@ -119,7 +98,7 @@ class CITRISVAE(torch.nn.Module):
                                                hidden_per_var=16)
 
         # remove causal_assignment_net params since they are included in classifier params
-        transition_prior_params = [p for n, p in self.transition_prior.named_parameters() if "causal_assignment_net" not in n and p.requires_grad]
+        # transition_prior_params = [p for n, p in self.transition_prior.named_parameters() if "causal_assignment_net" not in n and p.requires_grad]
 
         # Optimizer for training the model
         if self.args.use_flow_prior:
@@ -128,7 +107,7 @@ class CITRISVAE(torch.nn.Module):
                                       {'params': self.decoder.parameters()},
                                     #   {'params': self.transition_prior.parameters()},
                                       {'params': self.flow.parameters()},
-                                      {'params': transition_prior_params}
+                                    #   {'params': transition_prior_params}
                                       ], lr=self.args.lr, weight_decay=0.0)
         else:
             self.optimizer = optim.AdamW([{'params': self.intervention_classifier.parameters(), 'lr': self.args.classifier_lr, 'weight_decay': 1e-4},
@@ -136,7 +115,7 @@ class CITRISVAE(torch.nn.Module):
                                       {'params': self.decoder.parameters()},
                                     #   {'params': self.transition_prior.parameters()},
                                       # {'params': self.flow.parameters()},
-                                      {'params': transition_prior_params}
+                                    #   {'params': transition_prior_params}
                                       ], lr=self.args.lr, weight_decay=0.0)
 
         # self.optimizer = optim.Adam(self.parameters(), lr=self.args.lr, weight_decay=0.0)
@@ -178,18 +157,18 @@ class CITRISVAE(torch.nn.Module):
             #                                          z_t1_logstd=z_logstd[:,1:].flatten(0, 1), 
             #                                          z_t1_sample=z_sample[:,1:].flatten(0, 1))
 
-            kld_t1_all = self.transition_prior.kl_divergence(z_t=z_mean[:, :-1].view(b*(seq_len-1), -1), 
-                                                        target=target.view(b*(seq_len-1), -1), 
-                                                        z_t1_mean=z_mean[:, 1:].view(b*(seq_len-1), -1), 
-                                                        z_t1_logstd=z_logstd[:, 1:].view(b*(seq_len-1), -1), 
-                                                        z_t1_sample=z_sample[:, 1:].view(b*(seq_len-1), -1))
-            # kld_t1_all = kld_t1_all.unflatten(0, (imgs.shape[0], -1)).sum(dim=1)
-            # KL divergence between every pair of frames
-            # kld_t1_all = self.transition_prior.compute_kl_loss(z_t=z_mean[:, :-1].view(b*(seq_len-1), -1), 
-            #                                             intrv=target.view(b*(seq_len-1), -1), 
+            # kld_t1_all = self.transition_prior.kl_divergence(z_t=z_mean[:, :-1].view(b*(seq_len-1), -1), 
+            #                                             target=target.view(b*(seq_len-1), -1), 
             #                                             z_t1_mean=z_mean[:, 1:].view(b*(seq_len-1), -1), 
             #                                             z_t1_logstd=z_logstd[:, 1:].view(b*(seq_len-1), -1), 
-            #                                             z_t1_samples=z_sample[:, 1:].view(b*(seq_len-1), -1))
+            #                                             z_t1_sample=z_sample[:, 1:].view(b*(seq_len-1), -1))
+            # kld_t1_all = kld_t1_all.unflatten(0, (imgs.shape[0], -1)).sum(dim=1)
+            # KL divergence between every pair of frames
+            kld_t1_all = self.transition_prior.compute_kl_loss(z_t=z_mean[:, :-1].view(b*(seq_len-1), -1), 
+                                                        intrv=target.view(b*(seq_len-1), -1), 
+                                                        z_t1_mean=z_mean[:, 1:].view(b*(seq_len-1), -1), 
+                                                        z_t1_logstd=z_logstd[:, 1:].view(b*(seq_len-1), -1), 
+                                                        z_t1_samples=z_sample[:, 1:].view(b*(seq_len-1), -1))
 
             kld_t1_all = kld_t1_all.view(b, seq_len-1).sum(dim=1)
         # reconstruction loss

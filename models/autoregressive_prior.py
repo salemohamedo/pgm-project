@@ -1,6 +1,7 @@
 import torch.nn as nn
 import torch
 import torch.nn.functional as F
+from models.utils import gaussian_log_prob
 
 def kl_divergence_normal(mu1, mu2, log_std1, log_std2):
     return log_std2 - log_std1 + (torch.exp(2*log_std1) + torch.square(mu1 - mu2))/(2*torch.exp(2*log_std2)) - 0.5
@@ -118,7 +119,48 @@ class AutoregressivePrior(nn.Module):
 
         kl = (kl * causal_assign_probs.permute(1, 0).unsqueeze(0))
         return kl.sum(dim=[1,2])
-    
+
+    def sample_based_nll(self, z_t, z_t1, target):
+        batch_size, num_samples, _ = z_t.shape
+
+        target_oh = target
+        
+        # Sample a latent-to-causal assignment from psi
+        target_samples = self.causal_assignment_net(batch_size*num_samples)
+        # Add sample dimension and I_0=0 to the targets
+        target_exp = target_oh[:,None].expand(-1, num_samples, -1).flatten(0, 1)
+        target_exp = torch.cat([target_exp, target_exp.new_zeros(batch_size * num_samples, 1)], dim=-1)
+        # target_prod = target_exp[:,None,:] * target_samples - (1 - target_samples)
+
+        # # Obtain estimated prior parameters for p(z^t1|z^t,I^t+1)
+        # prior_params = self._get_prior_params(z_t.flatten(0, 1), 
+        #                                       target_samples=target_samples, 
+        #                                       target=target_exp,
+        #                                       target_prod=target_prod,
+        #                                       z_t1=z_t1.flatten(0, 1))
+        prior_params = self(z_t=z_t.flatten(0, 1), z_t1=z_t1.flatten(
+            0, 1), intrv=target_exp, causal_assignments=target_samples.permute(0, 2, 1))
+        prior_mean, prior_logstd = [p.unflatten(0, (batch_size, num_samples)) for p in prior_params]
+        # prior_mean - shape [batch_size, num_samples, num_blocks, num_latents]
+        # prior_logstd - shape [batch_size, num_samples, num_blocks, num_latents]
+        # z_t1 - shape [batch_size, num_samples, num_latents]
+        z_t1 = z_t1[:,:,None,:]  # Expand by block dimension
+        nll = -gaussian_log_prob(prior_mean[:,:,None,:,:], prior_logstd[:,:,None,:,:], z_t1[:,None,:,:,:])
+        # We take the mean over samples, both over the z^t and z^t+1 samples.
+        nll = nll.mean(dim=[1, 2])  # shape [batch_size, num_blocks, num_latents]
+        # Marginalize over target assignment
+
+        causal_assign_probs = self.causal_assignment_net.get_softmax_dist()
+
+        nll = nll * causal_assign_probs.permute(1, 0)[None]
+        nll = nll.sum(dim=[1, 2])  # shape [batch_size]
+
+        if self.lambda_reg > 0.0 and self.training:
+            # target_params_soft = torch.softmax(self.target_params, dim=-1)
+            nll = nll + self.lambda_reg * \
+                (1-causal_assign_probs[:, -1]).mean(dim=0)
+        return nll
+
     ## TODO: Rewrite
     def get_target_assignment(self, hard=False):
         # Returns psi, either 'hard' (one-hot, e.g. for triplet eval) or 'soft' (probabilities, e.g. for debug)
