@@ -8,7 +8,7 @@ import numpy as np
 from collections import OrderedDict, defaultdict
 import matplotlib.pyplot as plt
 
-from models.utils import CosineWarmupScheduler, get_act_fn
+from models.utils import CosineWarmupScheduler #, get_act_fn
 from models.CITRIS_encoder_decoder import Encoder
 
 
@@ -67,10 +67,11 @@ class CausalEncoder(pl.LightningModule):
         """
         super().__init__()
         self.save_hyperparameters()
+        self.causal_var_info = causal_var_info
 
         # Base Network
         if not self.hparams.single_linear:
-            act_fn_func = get_act_fn(self.hparams.act_fn)
+            act_fn_func = nn.SiLU() #get_act_fn(self.hparams.act_fn)
             self.encoder = Encoder(num_latents=self.hparams.c_hid,
                                    c_in=max(3, self.hparams.c_in),
                                    c_hid=self.hparams.c_hid,

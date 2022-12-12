@@ -288,6 +288,7 @@ def log_R2_statistic(target_names, encoder, epoch, split, logdir, test_labels, n
     for i, var_key in enumerate(encoder.causal_var_info):
         var_info = encoder.causal_var_info[var_key]
         gt_vals = test_labels[...,i]
+        
         if var_info.startswith('continuous'):
             avg_pred_dict[var_key] = gt_vals.mean(dim=0, keepdim=True).expand(gt_vals.shape[0],)
         elif var_info.startswith('angle'):
@@ -302,7 +303,7 @@ def log_R2_statistic(target_names, encoder, epoch, split, logdir, test_labels, n
         else:
             assert False, f'Do not know how to handle key \"{var_key}\" in R2 statistics.'
     _, _, avg_norm_dists = encoder.calculate_loss_distance(avg_pred_dict, test_labels, keep_sign=True)
-
+    
     r2_matrix = []
     for var_key in encoder.causal_var_info:
         ss_res = (norm_dists[var_key] ** 2).mean(dim=0)

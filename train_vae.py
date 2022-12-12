@@ -105,7 +105,7 @@ def main(args):
     if not os.path.exists(checkpoint_dir):
         os.makedirs(checkpoint_dir)
 
-    logdir = os.path.join(args.output_dir, args.model_name, args.dataset_name, "log2")
+    logdir = os.path.join(args.output_dir, args.model_name, args.dataset_name, "log")
     if not os.path.exists(logdir):
         os.makedirs(logdir)
     args.logdir = logdir
@@ -147,7 +147,7 @@ def get_args_parser():
     parser.add_argument('--model_name', type=str, default="citris_vae")
     parser.add_argument('--seed', type=int, default=2022)
     parser.add_argument('--num_epochs', type=int, default=200)
-    parser.add_argument('--probe_num_epochs', type=int, default=200)
+    parser.add_argument('--probe_num_epochs', type=int, default=100)
     parser.add_argument('--probe_lr', type=float, default=4e-3)
     parser.add_argument('--batch_size', type=int, default=512)
     parser.add_argument('--num_workers', type=int, default=6)
