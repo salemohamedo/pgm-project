@@ -29,17 +29,6 @@ def load_datasets(args):
         dataset_args = {}
         test_args = lambda train_set: {'causal_vars': train_set.target_names_l}
 
-    # if 'pong' == args.dataset_name:
-    #     DataClass = InterventionalPongDataset
-    # elif 'causal3d' == args.dataset_name:
-    #     DataClass = Causal3DDataset
-    # elif 'voronoi' == args.dataset_name:
-    #     DataClass = VoronoiDataset
-    # elif 'pinball' == args.dataset_name:
-    #     DataClass = PinballDataset
-    # elif 'ball_in_boxes' == args.dataset_name:
-    #     DataClass = BallInBoxesDataset
-
     train_dataset = DataClass(
         data_folder=args.data_dir, split='train', single_image=False, triplet=False, seq_len=args.seq_len, **dataset_args)
     val_dataset = DataClass(

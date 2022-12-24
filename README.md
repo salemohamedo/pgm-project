@@ -1,14 +1,4 @@
-# pgm-project
-
+# PGM Final Project
+This repository re-implements the core architectural components and training code from the paper [CITRIS](https://arxiv.org/abs/2202.03169). We re-use most of the evaluation and dataset utility code from the [official implementation](https://github.com/phlippe/CITRIS).
 ## To run for pong dataset:
-`python train.py --data_dir data/interventional_pong  --lambda_reg 0 --max_epochs 200`
-
-For quick experimentation, set `max_epochs` to `1`. Otherwise, to check you're getting correct results, set `max_epochs` to `200`
-
-Once your code has run, you should have a new checkpoints folder. To view the results in tensorboard, do: 
-
-`tensorboard --logdir pgm-project/checkpoints/CITRISVAE/CITRISVAE_16l_5b_32hid_pong/(YOUR_VERSION) --port 6006`
-
-Each run creates a new version, so make sure you're using the latest one to view the results.
-
-To check you're getting the correct results after 200 epochs, compare with the results from the project update report. 
+python train_vae.py --data_dir $LINK_TO_PONG_YOUR_PONG_DATASET
